@@ -83,6 +83,13 @@ def new_id():
     return str(uuid.uuid4())
 
 
+import re as _re_mod
+
+
+def _re_escape(s: str) -> str:
+    return _re_mod.escape(s)
+
+
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode("utf-8")[:72], bcrypt.gensalt(rounds=12)).decode("utf-8")
 
@@ -133,7 +140,7 @@ def public_user(u: dict) -> dict:
     return {"id": u["id"], "username": u.get("username"), "display_name": u.get("display_name"),
             "avatar_url": u.get("avatar_url"), "bio": u.get("bio"), "city": u.get("city"),
             "state": u.get("state"), "role": u.get("role"), "is_professional": u.get("is_professional", False),
-            "interests": u.get("interests", [])}
+            "interests": u.get("interests", []), "profile_public": u.get("profile_public", False)}
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -232,6 +239,7 @@ class ProfileUpdate(BaseModel):
     state: Optional[str] = None
     avatar_url: Optional[str] = None
     interests: Optional[List[str]] = None
+    profile_public: Optional[bool] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
 
@@ -251,6 +259,9 @@ class PostIn(BaseModel):
     service_name: Optional[str] = None
     style_id: Optional[str] = None
     style_name: Optional[str] = None
+    style_ids: List[str] = []
+    style_names: List[str] = []
+    custom_category: Optional[str] = None
     attributes: Dict[str, Any] = {}
     city: Optional[str] = None
     state: Optional[str] = None
@@ -344,7 +355,7 @@ async def register(body: RegisterIn):
             "role": "customer", "username": uname, "display_name": body.display_name.strip(),
             "bio": "", "city": None, "state": None, "avatar_url": None, "interests": [],
             "lat": None, "lng": None, "is_professional": False, "professional_id": None,
-            "disabled": False, "created_at": now_iso()}
+            "profile_public": False, "disabled": False, "created_at": now_iso()}
     await db.users.insert_one(user)
     return {"access_token": make_token(user), "user": public_user(user)}
 
@@ -389,13 +400,53 @@ async def get_user(user_id: str, viewer: Optional[dict] = Depends(get_optional_u
         raise HTTPException(404, "User not found")
     data = public_user(u)
     data["professional_id"] = u.get("professional_id")
+    data["is_following"] = False
+    is_owner = viewer and viewer["id"] == u["id"]
+    if viewer:
+        data["is_following"] = bool(await db.follows.find_one({"follower_id": viewer["id"], "following_id": u["id"]}))
+    # Privacy gate: private client profiles are limited to owner (and non-professionals)
+    if not u.get("profile_public", False) and not u.get("is_professional") and not is_owner:
+        data["private"] = True
+        data["followers"] = await db.follows.count_documents({"following_id": u["id"]})
+        data["following"] = await db.follows.count_documents({"follower_id": u["id"]})
+        data["post_count"] = 0
+        return data
+    data["private"] = False
     data["followers"] = await db.follows.count_documents({"following_id": u["id"]})
     data["following"] = await db.follows.count_documents({"follower_id": u["id"]})
     data["post_count"] = await db.posts.count_documents({"author_id": u["id"]})
-    data["is_following"] = False
-    if viewer:
-        data["is_following"] = bool(await db.follows.find_one({"follower_id": viewer["id"], "following_id": u["id"]}))
     return data
+
+
+@api.get("/users/{user_id}/followers")
+async def get_followers(user_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
+    rels = await db.follows.find({"following_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return await _users_from_rels([r["follower_id"] for r in rels], viewer)
+
+
+@api.get("/users/{user_id}/following")
+async def get_following(user_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
+    rels = await db.follows.find({"follower_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return await _users_from_rels([r["following_id"] for r in rels], viewer)
+
+
+async def _users_from_rels(ids: list, viewer: Optional[dict]):
+    if not ids:
+        return []
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": ids}}, {"_id": 0}).to_list(len(ids))}
+    my_following = set()
+    if viewer:
+        my_following = {f["following_id"] for f in await db.follows.find({"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}).to_list(2000)}
+    out = []
+    for uid in ids:
+        u = users.get(uid)
+        if not u:
+            continue
+        out.append({"id": u["id"], "username": u.get("username"), "display_name": u.get("display_name"),
+                    "avatar_url": u.get("avatar_url"), "is_professional": u.get("is_professional", False),
+                    "professional_id": u.get("professional_id"),
+                    "is_following": u["id"] in my_following, "is_me": bool(viewer and viewer["id"] == u["id"])})
+    return out
 
 
 # ------------------------- Catalog: categories / services / styles -------------------------
@@ -413,8 +464,29 @@ async def get_services(category_id: Optional[str] = None):
 
 
 @api.get("/styles")
-async def get_styles():
-    return await db.styles.find({"active": True}, {"_id": 0}).sort("name", 1).to_list(500)
+async def get_styles(q: Optional[str] = None):
+    query = {"active": True}
+    if q:
+        query["searchable_name"] = {"$regex": _re_escape(q.strip().lower()), "$options": "i"}
+    return await db.styles.find(query, {"_id": 0}).sort("usage_count", -1).to_list(500)
+
+
+@api.post("/styles")
+async def create_style(body: CatalogIn, user: dict = Depends(get_current_user)):
+    """Find-or-create a style, normalized to avoid duplicates (Boho == boho == BOHO)."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Style name required")
+    key = name.lower()
+    existing = await db.styles.find_one({"searchable_name": key}, {"_id": 0})
+    if existing:
+        await db.styles.update_one({"id": existing["id"]}, {"$inc": {"usage_count": 1}})
+        return existing
+    style = {"id": new_id(), "name": name, "searchable_name": key, "category_id": body.category_id,
+             "usage_count": 1, "active": True, "created_by": user["id"], "created_at": now_iso()}
+    await db.styles.insert_one(style)
+    style.pop("_id", None)
+    return style
 
 
 # ------------------------- Posts -------------------------
@@ -428,14 +500,19 @@ async def create_post(body: PostIn, user: dict = Depends(get_current_user)):
             tag_status = "confirmed"
     post = {"id": new_id(), "author_id": user["id"], "post_type": post_type,
             "media": [m.dict() for m in body.media], "caption": body.caption or "",
-            "category_id": body.category_id, "service_id": body.service_id, "service_name": body.service_name,
-            "style_id": body.style_id, "style_name": body.style_name, "attributes": body.attributes,
+            "category_id": body.category_id, "custom_category": body.custom_category,
+            "service_id": body.service_id, "service_name": body.service_name,
+            "style_id": body.style_id, "style_name": body.style_name or (body.style_names[0] if body.style_names else None),
+            "style_names": body.style_names or ([body.style_name] if body.style_name else []),
+            "attributes": body.attributes,
             "city": body.city, "state": body.state, "lat": body.lat, "lng": body.lng,
             "tagged_professional_id": body.tagged_professional_id, "tag_status": tag_status,
             "professional_details": None, "professional_details_by": None,
             "like_count": 0, "comment_count": 0, "save_count": 0, "view_count": 0,
             "created_at": now_iso()}
     await db.posts.insert_one(post)
+    for sname in (post["style_names"] or []):
+        await db.styles.update_one({"searchable_name": sname.strip().lower()}, {"$inc": {"usage_count": 1}})
     if body.tagged_professional_id and tag_status == "pending":
         pro = await db.professional_profiles.find_one({"id": body.tagged_professional_id})
         if pro:
@@ -570,6 +647,23 @@ async def add_comment(post_id: str, body: CommentIn, user: dict = Depends(get_cu
 
 
 # ------------------------- Saves & Collections -------------------------
+async def _sync_collection(cid: str):
+    items = await db.collection_items.find({"collection_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    ids = [i["post_id"] for i in items]
+    thumbs = []
+    if ids:
+        posts = await db.posts.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "media": 1}).to_list(500)
+        pmap = {p["id"]: p for p in posts}
+        for pid in ids:
+            p = pmap.get(pid)
+            if p and p.get("media"):
+                thumbs.append(p["media"][0]["url"])
+            if len(thumbs) >= 4:
+                break
+    await db.collections.update_one({"id": cid}, {"$set": {"post_count": len(ids), "thumbs": thumbs,
+                                                           "cover_url": thumbs[0] if thumbs else None}})
+
+
 @api.post("/posts/{post_id}/save")
 async def save_post(post_id: str, collection_id: Optional[str] = None, user: dict = Depends(get_current_user)):
     post = await db.posts.find_one({"id": post_id})
@@ -578,16 +672,12 @@ async def save_post(post_id: str, collection_id: Optional[str] = None, user: dic
     existing = await db.saves.find_one({"post_id": post_id, "user_id": user["id"]})
     if not existing:
         await db.saves.insert_one({"id": new_id(), "post_id": post_id, "user_id": user["id"],
-                                   "collection_id": collection_id, "created_at": now_iso()})
+                                   "created_at": now_iso()})
         await db.posts.update_one({"id": post_id}, {"$inc": {"save_count": 1}})
         await log_event("SAVE", user["id"], None, post_id)
         await notify(post["author_id"], "save", user["id"], f"{user['display_name']} saved your post", post_id)
-    elif collection_id:
-        await db.saves.update_one({"id": existing["id"]}, {"$set": {"collection_id": collection_id}})
     if collection_id:
-        cover = post["media"][0]["url"] if post.get("media") else None
-        cnt = await db.saves.count_documents({"collection_id": collection_id})
-        await db.collections.update_one({"id": collection_id}, {"$set": {"post_count": cnt, "cover_url": cover}})
+        await _add_to_collection(collection_id, post_id, user["id"])
     return {"saved": True}
 
 
@@ -597,10 +687,47 @@ async def unsave_post(post_id: str, user: dict = Depends(get_current_user)):
     if save:
         await db.saves.delete_one({"id": save["id"]})
         await db.posts.update_one({"id": post_id}, {"$inc": {"save_count": -1}})
-        if save.get("collection_id"):
-            cnt = await db.saves.count_documents({"collection_id": save["collection_id"]})
-            await db.collections.update_one({"id": save["collection_id"]}, {"$set": {"post_count": cnt}})
+    # remove from all collections owned by user
+    items = await db.collection_items.find({"post_id": post_id, "user_id": user["id"]}, {"_id": 0}).to_list(100)
+    await db.collection_items.delete_many({"post_id": post_id, "user_id": user["id"]})
+    for cid in {i["collection_id"] for i in items}:
+        await _sync_collection(cid)
     return {"saved": False}
+
+
+async def _add_to_collection(cid: str, post_id: str, user_id: str):
+    col = await db.collections.find_one({"id": cid, "user_id": user_id})
+    if not col:
+        raise HTTPException(404, "Collection not found")
+    if not await db.collection_items.find_one({"collection_id": cid, "post_id": post_id}):
+        await db.collection_items.insert_one({"id": new_id(), "collection_id": cid, "post_id": post_id,
+                                              "user_id": user_id, "created_at": now_iso()})
+    # ensure a flat save exists too
+    if not await db.saves.find_one({"post_id": post_id, "user_id": user_id}):
+        await db.saves.insert_one({"id": new_id(), "post_id": post_id, "user_id": user_id, "created_at": now_iso()})
+        await db.posts.update_one({"id": post_id}, {"$inc": {"save_count": 1}})
+    await db.collections.update_one({"id": cid}, {"$set": {"last_used_at": now_iso()}})
+    await _sync_collection(cid)
+
+
+@api.post("/collections/{cid}/items")
+async def add_collection_item(cid: str, post_id: str, user: dict = Depends(get_current_user)):
+    await _add_to_collection(cid, post_id, user["id"])
+    return {"ok": True}
+
+
+@api.delete("/collections/{cid}/items/{post_id}")
+async def remove_collection_item(cid: str, post_id: str, user: dict = Depends(get_current_user)):
+    await db.collection_items.delete_many({"collection_id": cid, "post_id": post_id, "user_id": user["id"]})
+    await _sync_collection(cid)
+    return {"ok": True}
+
+
+@api.get("/posts/{post_id}/collections")
+async def post_collections(post_id: str, user: dict = Depends(get_current_user)):
+    """Return the user's collections that contain this post (for save UI)."""
+    items = await db.collection_items.find({"post_id": post_id, "user_id": user["id"]}, {"_id": 0, "collection_id": 1}).to_list(100)
+    return {"collection_ids": [i["collection_id"] for i in items]}
 
 
 @api.get("/saved")
@@ -615,14 +742,14 @@ async def get_saved(viewer: dict = Depends(get_current_user)):
 
 @api.get("/collections")
 async def list_collections(viewer: dict = Depends(get_current_user)):
-    cols = await db.collections.find({"user_id": viewer["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    cols = await db.collections.find({"user_id": viewer["id"]}, {"_id": 0}).sort([("last_used_at", -1), ("created_at", -1)]).to_list(200)
     return cols
 
 
 @api.post("/collections")
 async def create_collection(body: CollectionIn, viewer: dict = Depends(get_current_user)):
     col = {"id": new_id(), "user_id": viewer["id"], "name": body.name, "cover_url": body.cover_url,
-           "post_count": 0, "created_at": now_iso()}
+           "thumbs": [], "post_count": 0, "created_at": now_iso(), "last_used_at": now_iso()}
     await db.collections.insert_one(col)
     col.pop("_id", None)
     return col
@@ -640,16 +767,18 @@ async def rename_collection(cid: str, body: CollectionIn, viewer: dict = Depends
 @api.delete("/collections/{cid}")
 async def delete_collection(cid: str, viewer: dict = Depends(get_current_user)):
     await db.collections.delete_one({"id": cid, "user_id": viewer["id"]})
-    await db.saves.update_many({"collection_id": cid}, {"$set": {"collection_id": None}})
+    await db.collection_items.delete_many({"collection_id": cid})
     return {"ok": True}
 
 
 @api.get("/collections/{cid}/posts")
 async def collection_posts(cid: str, viewer: dict = Depends(get_current_user)):
-    saves = await db.saves.find({"collection_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    ids = [s["post_id"] for s in saves]
+    items = await db.collection_items.find({"collection_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    ids = [i["post_id"] for i in items]
     posts = await db.posts.find({"id": {"$in": ids}}, {"_id": 0}).to_list(500)
-    return await enrich_posts(posts, viewer)
+    pmap = {p["id"]: p for p in posts}
+    ordered = [pmap[i] for i in ids if i in pmap]
+    return await enrich_posts(ordered, viewer)
 
 
 # ------------------------- Follows -------------------------
@@ -696,7 +825,7 @@ async def pro_onboard(body: ProOnboardIn, user: dict = Depends(get_current_user)
            "lng": body.lng if body.lng is not None else user.get("lng"),
            "services": services, "verification_status": "NOT_VERIFIED", "created_at": now_iso()}
     await db.professional_profiles.insert_one(pro)
-    await db.users.update_one({"id": user["id"]}, {"$set": {"is_professional": True, "professional_id": pro["id"]}})
+    await db.users.update_one({"id": user["id"]}, {"$set": {"is_professional": True, "professional_id": pro["id"], "profile_public": True}})
     pro.pop("_id", None)
     return pro
 
@@ -946,6 +1075,8 @@ async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
         {"caption": {"$regex": rx, "$options": "i"}},
         {"service_name": {"$regex": rx, "$options": "i"}},
         {"style_name": {"$regex": rx, "$options": "i"}},
+        {"style_names": {"$regex": rx, "$options": "i"}},
+        {"custom_category": {"$regex": rx, "$options": "i"}},
     ]
     if cat_ids:
         or_clauses.append({"category_id": {"$in": cat_ids}})

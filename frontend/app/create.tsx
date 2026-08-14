@@ -36,7 +36,11 @@ export default function CreatePost() {
   const [catId, setCatId] = useState<string | null>(null);
   const [catName, setCatName] = useState<string>("");
   const [svc, setSvc] = useState<Svc | null>(null);
-  const [style, setStyle] = useState<Style | null>(null);
+  const [customCategory, setCustomCategory] = useState("");
+  const [svcMode, setSvcMode] = useState<"pick" | "custom">("pick");
+  const [customService, setCustomService] = useState("");
+  const [styleQuery, setStyleQuery] = useState("");
+  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [attrs, setAttrs] = useState<Record<string, string>>({});
   const [city, setCity] = useState(user?.city || "");
   const [state, setState] = useState(user?.state || "");
@@ -135,14 +139,21 @@ export default function CreatePost() {
   const publish = async () => {
     setPublishing(true);
     try {
+      // persist any custom styles so they become searchable/structured
+      for (const sname of selectedStyles) {
+        await apiFetch("/styles", { method: "POST", body: { name: sname, category_id: catId } }).catch(() => {});
+      }
+      const serviceName = svcMode === "custom" ? customService.trim() : svc?.name || null;
       const body: any = {
         media,
         caption,
         category_id: catId,
-        service_id: svc?.id || null,
-        service_name: svc?.name || null,
-        style_id: style?.id || null,
-        style_name: style?.name || null,
+        custom_category: catName === "Other" ? customCategory.trim() || null : null,
+        service_id: svcMode === "pick" ? svc?.id || null : null,
+        service_name: serviceName,
+        style_id: null,
+        style_name: selectedStyles[0] || null,
+        style_names: selectedStyles,
         attributes: Object.fromEntries(Object.entries(attrs).filter(([, v]) => v)),
         city: city || null,
         state: state || null,
@@ -222,12 +233,25 @@ export default function CreatePost() {
             <Text style={styles.stepTitle}>Select a category</Text>
             <View style={styles.chips}>
               {cats.map((c) => (
-                <Pressable key={c.id} testID={`create-cat-${c.name}`} onPress={() => { setCatId(c.id); setCatName(c.name); setSvc(null); }} style={[styles.optChip, catId === c.id && styles.optChipActive]}>
+                <Pressable key={c.id} testID={`create-cat-${c.name}`} onPress={() => { setCatId(c.id); setCatName(c.name); setSvc(null); setSvcMode("pick"); }} style={[styles.optChip, catId === c.id && styles.optChipActive]}>
                   <MaterialCommunityIcons name={c.icon as any} size={18} color={catId === c.id ? colors.onSurfaceInverse : colors.brandDeep} />
                   <Text style={[styles.optChipText, catId === c.id && { color: colors.onSurfaceInverse }]}>{c.name}</Text>
                 </Pressable>
               ))}
             </View>
+            {catName === "Other" && (
+              <View style={{ marginTop: spacing.lg }}>
+                <Text style={styles.fieldLabel}>Enter your category</Text>
+                <TextInput
+                  testID="create-custom-category"
+                  value={customCategory}
+                  onChangeText={setCustomCategory}
+                  placeholder="e.g. Editorial Makeup"
+                  placeholderTextColor={colors.faint}
+                  style={styles.smallInput}
+                />
+              </View>
+            )}
           </View>
         )}
 
@@ -237,25 +261,72 @@ export default function CreatePost() {
             <Text style={type.body}>Optional — what service is this?</Text>
             <View style={styles.chips}>
               {services.map((s) => (
-                <Pressable key={s.id} testID={`create-svc-${s.name}`} onPress={() => setSvc(svc?.id === s.id ? null : s)} style={[styles.optChip, svc?.id === s.id && styles.optChipActive]}>
-                  <Text style={[styles.optChipText, svc?.id === s.id && { color: colors.onSurfaceInverse }]}>{s.name}</Text>
+                <Pressable key={s.id} testID={`create-svc-${s.name}`} onPress={() => { setSvcMode("pick"); setSvc(svc?.id === s.id ? null : s); }} style={[styles.optChip, svcMode === "pick" && svc?.id === s.id && styles.optChipActive]}>
+                  <Text style={[styles.optChipText, svcMode === "pick" && svc?.id === s.id && { color: colors.onSurfaceInverse }]}>{s.name}</Text>
                 </Pressable>
               ))}
-              {services.length === 0 && <Text style={type.small}>No services for this category.</Text>}
+              <Pressable testID="create-svc-other" onPress={() => { setSvcMode("custom"); setSvc(null); }} style={[styles.optChip, svcMode === "custom" && styles.optChipActive]}>
+                <MaterialCommunityIcons name="plus" size={16} color={svcMode === "custom" ? colors.onSurfaceInverse : colors.brandDeep} />
+                <Text style={[styles.optChipText, svcMode === "custom" && { color: colors.onSurfaceInverse }]}>Other / Custom</Text>
+              </Pressable>
             </View>
+            {svcMode === "custom" && (
+              <View style={{ marginTop: spacing.lg }}>
+                <Text style={styles.fieldLabel}>Custom service</Text>
+                <TextInput
+                  testID="create-custom-service"
+                  value={customService}
+                  onChangeText={setCustomService}
+                  placeholder="e.g. Mermaid Knotless Braids"
+                  placeholderTextColor={colors.faint}
+                  style={styles.smallInput}
+                />
+              </View>
+            )}
           </View>
         )}
 
         {step === 4 && (
           <View>
-            <Text style={styles.stepTitle}>Select a style</Text>
-            <Text style={type.body}>Optional — the vibe of the look.</Text>
-            <View style={styles.chips}>
-              {styles_.map((s) => (
-                <Pressable key={s.id} testID={`create-style-${s.name}`} onPress={() => setStyle(style?.id === s.id ? null : s)} style={[styles.optChip, style?.id === s.id && styles.optChipActive]}>
-                  <Text style={[styles.optChipText, style?.id === s.id && { color: colors.onSurfaceInverse }]}>{s.name}</Text>
-                </Pressable>
-              ))}
+            <Text style={styles.stepTitle}>Add styles</Text>
+            <Text style={type.body}>Search or create style tags. Add as many as you like.</Text>
+            {selectedStyles.length > 0 && (
+              <View style={[styles.chips, { marginTop: spacing.md }]}>
+                {selectedStyles.map((s) => (
+                  <Pressable key={s} testID={`style-tag-${s}`} onPress={() => setSelectedStyles((arr) => arr.filter((x) => x !== s))} style={[styles.optChip, styles.optChipActive]}>
+                    <Text style={[styles.optChipText, { color: colors.onSurfaceInverse }]}>{s}</Text>
+                    <MaterialCommunityIcons name="close" size={15} color={colors.onSurfaceInverse} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            <TextInput
+              testID="create-style-search"
+              value={styleQuery}
+              onChangeText={setStyleQuery}
+              placeholder="Type a style e.g. Boho, Wispy…"
+              placeholderTextColor={colors.faint}
+              style={[styles.smallInput, { marginTop: spacing.md }]}
+              autoCapitalize="words"
+            />
+            <View style={[styles.chips, { marginTop: spacing.md }]}>
+              {styles_
+                .filter((s) => !styleQuery || s.name.toLowerCase().includes(styleQuery.toLowerCase()))
+                .filter((s) => !selectedStyles.includes(s.name))
+                .slice(0, 20)
+                .map((s) => (
+                  <Pressable key={s.id} testID={`create-style-${s.name}`} onPress={() => { setSelectedStyles((arr) => [...arr, s.name]); setStyleQuery(""); }} style={styles.optChip}>
+                    <Text style={styles.optChipText}>{s.name}</Text>
+                  </Pressable>
+                ))}
+              {styleQuery.trim().length > 1 &&
+                !styles_.some((s) => s.name.toLowerCase() === styleQuery.trim().toLowerCase()) &&
+                !selectedStyles.some((s) => s.toLowerCase() === styleQuery.trim().toLowerCase()) && (
+                  <Pressable testID="create-style-add-custom" onPress={() => { setSelectedStyles((arr) => [...arr, styleQuery.trim()]); setStyleQuery(""); }} style={[styles.optChip, { borderColor: colors.brandDeep, borderStyle: "dashed" }]}>
+                    <MaterialCommunityIcons name="plus" size={15} color={colors.brandDeep} />
+                    <Text style={[styles.optChipText, { color: colors.brandDeep }]}>Create "{styleQuery.trim()}"</Text>
+                  </Pressable>
+                )}
             </View>
           </View>
         )}
@@ -327,9 +398,9 @@ export default function CreatePost() {
             {media[0] && <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />}
             {caption ? <Text style={[styles.caption]}>{caption}</Text> : null}
             <View style={styles.previewMeta}>
-              <PreviewRow label="Category" value={catName} />
-              <PreviewRow label="Service" value={svc?.name} />
-              <PreviewRow label="Style" value={style?.name} />
+              <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} />
+              <PreviewRow label="Service" value={svcMode === "custom" ? customService : svc?.name} />
+              <PreviewRow label="Style" value={selectedStyles.join(", ")} />
               <PreviewRow label="Location" value={[city, state].filter(Boolean).join(", ")} />
               <PreviewRow label="Tagged" value={taggedPro ? `@${taggedPro.username}` : undefined} />
             </View>

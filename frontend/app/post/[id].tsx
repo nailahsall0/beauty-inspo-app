@@ -11,6 +11,7 @@ import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
 import { Post } from "@/src/components/Feed";
+import { SaveSheet } from "@/src/components/SaveSheet";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
 
@@ -29,6 +30,7 @@ export default function PostDetail() {
   const [showDetails, setShowDetails] = useState(false);
   const [proDetailsInput, setProDetailsInput] = useState("");
   const [addingDetails, setAddingDetails] = useState(false);
+  const [saveSheet, setSaveSheet] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -234,9 +236,12 @@ export default function PostDetail() {
               <MaterialCommunityIcons name="comment-outline" size={22} color={colors.onSurface} />
               <Text style={styles.actionCount}>{(post as any).comment_count}</Text>
             </View>
-            <Pressable testID="post-save" onPress={toggleSave} style={styles.actionBtn}>
+            <Pressable testID="post-save" onPress={toggleSave} onLongPress={() => setSaveSheet(true)} delayLongPress={250} style={styles.actionBtn}>
               <MaterialCommunityIcons name={post.saved ? "bookmark" : "bookmark-outline"} size={23} color={post.saved ? colors.brandDeep : colors.onSurface} />
               <Text style={styles.actionCount}>{post.save_count}</Text>
+            </Pressable>
+            <Pressable testID="post-save-to" onPress={() => setSaveSheet(true)} style={styles.actionBtn}>
+              <MaterialCommunityIcons name="folder-plus-outline" size={22} color={colors.onSurface} />
             </Pressable>
           </View>
 
@@ -285,6 +290,13 @@ export default function PostDetail() {
           )}
         </View>
       </KeyboardStickyView>
+
+      <SaveSheet
+        visible={saveSheet}
+        postId={post.id}
+        onClose={() => setSaveSheet(false)}
+        onChanged={() => setPost((p) => (p && !p.saved ? { ...p, saved: true, save_count: p.save_count + 1 } : p))}
+      />
     </View>
   );
 }

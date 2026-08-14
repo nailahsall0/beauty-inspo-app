@@ -1,0 +1,60 @@
+{
+  "summary": "Iteration 3: Verified all newly requested fixes. Backend: 20/21 tests PASS in /app/backend/tests/test_iteration3_fixes.py. Verified followers/following endpoints return correct shape (id, username, display_name, avatar_url, is_professional, professional_id, is_following, is_me) and counts match /users/{id}. Verified client-privacy: new registrations default profile_public=false; a private client viewed by another user returns private:true with post_count:0 and no posts leaked; owner sees full data; PUT /users/me toggles profile_public; seeded professional (kay) remains public. Verified collections many-to-many: a single post can be added to multiple collections; /posts/{id}/collections returns the collection_ids; DELETE /collections/{cid}/items/{pid} removes from that collection only; thumbs (image urls) and post_count auto-populate; adding to a collection ensures a flat /saved entry; DELETE /posts/{pid}/save removes from /saved and all user collections and sets post_count to 0; collections sorted by last_used_at desc. Verified styles find-or-create is normalized (Boho / boho / BOHO produce ONE row in db.styles with usage_count incremented by 3), sorted by usage_count desc, and new custom styles store searchable_name, usage_count=1, created_by, created_at. Verified categories: only the 8 real categories (Hair, Nails, Lashes, Brows, Makeup, Skincare, Waxing, Other) - no test/dev categories. Verified POST /posts persists custom_category, custom service_name, and style_names array. Regression: /posts/feed enrichment (author, tagged_professional, liked, saved) intact across foryou/following/nearby; /professional/{id}, /search, /notifications endpoints still work. Frontend (mobile 390x844, logged in as maya): home feed loads without crash, 8 categories displayed, 'Client' role chip visible, profile stats 'Posts 2 / Followers 0 / Following 1' render, Edit Profile + Become a Pro buttons visible, Saved tab has 'Posts / Collections' sub-tabs (Pinterest style), My Looks section renders. Home video element rendered with muted=true, loop=true (as coded).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/posts + GET /api/search", "issue": "When a post is created with only style_names=[...] and no explicit style_name, the server does NOT auto-populate style_name from style_names[0]. Combined with the search endpoint only matching the singular 'style_name' field (server.py:1077), posts created via the new create.tsx step-4 flow (which multi-tags via style_names[]) are NOT findable via /api/search?q=<tagname>. The spec explicitly requires: 'style_name(=first)' and 'findable via GET /api/search?q=<a style name in style_names>'. See server.py:505-506 (create_post) and server.py:1074-1078 (search or_clauses missing {\"style_names\": {\"$regex\": ...}}).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/auth/me", "issue": "(pre-existing from iter 2) omits professional_id / is_professional even when the user is a professional. Owner detection on /professional/[id] after a hard reload relies on the login-response user object."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Feed AutoVideo (src/components/Feed.tsx)", "issue": "In the web preview, the <video> element for the seeded video post has muted=true, loop=true (correct) but autoplay=false, paused=true, readyState=0 - the source did not begin loading/playing. In native this uses useVideoPlayer().play() which works on device, but the expo-video web bridge does not appear to autoplay in the browser preview. Not a crash - noting for user-perceived autoplay UX.", "testID": "feed-card-*", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Create post -> Search by style tag", "issue": "Even with the new style_names[] multi-tag input on step-4 of create.tsx, the backend does not index style_names for search. Posts created through the new UI will therefore NOT surface in /discover when the user searches for a style name they added. Fix: (a) in POST /api/posts, if style_name is falsy, set style_name = style_names[0]; and/or (b) in search, add {\"style_names\": {\"$regex\": rx, \"$options\": \"i\"}} to or_clauses.", "affected_testIDs": ["create-post", "search-input"]}
+    ],
+    "design_issues": [
+      {"screen": "Feed / All screens", "issues": [
+        "(pre-existing from iter 2) Seed image quality: many posts use unrelated stock images not matching their style/category."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "StyleSheet shadow* style props", "issue": "React Native Web logs '\"shadow*\" style props are deprecated. Use \"boxShadow\".' on every screen. Pre-existing from iter 1/2 - migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to boxShadow (or guard by Platform.OS !== 'web')."},
+      {"component": "pointerEvents prop", "issue": "React Native Web logs 'props.pointerEvents is deprecated. Use style.pointerEvents'. Pre-existing from iter 1/2 - move pointerEvents into the style object."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3_fixes.py",
+    "/app/backend/tests/test_iteration2_fixes.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "HIGH: In POST /api/posts (backend/server.py ~line 505), when body.style_name is falsy but body.style_names is non-empty, set post['style_name'] = body.style_names[0] so it matches the spec 'style_name(=first)'.",
+    "HIGH: In /api/search (backend/server.py ~line 1074-1078), add {\"style_names\": {\"$regex\": rx, \"$options\": \"i\"}} to or_clauses so posts created via the multi-style-tag UI are findable.",
+    "MEDIUM: expo-video web preview does not autoplay - either verify on-device before shipping or add a Platform.OS==='web' branch in Feed AutoVideo that emits an HTML <video muted loop autoplay playsInline> to guarantee muted-autoplay in browsers.",
+    "(pre-existing) Include professional_id + is_professional in GET /api/auth/me so owner detection after cold-start works without a fresh login response.",
+    "(pre-existing) Migrate shadow* -> boxShadow and pointerEvents -> style.pointerEvents to silence RN Web deprecation noise.",
+    "(pre-existing) Replace unrelated seed images with beauty-relevant photos."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1295 lines (still >700 line guideline) - consider splitting into routers (auth, posts, professional, catalog, collections, search, admin).",
+    "Collections: /collections/{cid}/items uses ?post_id= (query param) - this is intentional per spec but consider accepting JSON body {post_id: '...'} as well for consistency with the rest of the API.",
+    "Privacy gate at server.py:408 is well-implemented; correctly hides posts for private clients while still exposing follow counts. Owner and pros are correctly excluded from the gate.",
+    "Styles normalization via searchable_name key is clean and correct - duplicates verified impossible via the test suite.",
+    "_sync_collection() correctly recomputes thumbs and post_count on every add/remove; consider only reading the first 4 posts (currently loads up to 500 for thumbs)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3_fixes.py (new - 21 tests)",
+    "/app/test_reports/iteration_3.json (this report)",
+    "/app/test_reports/pytest/iter3_results.xml (junit output)"
+  ],
+  "success_rate": {"backend": "20/21 (95.2%) - single failure is the style-search bug documented above", "frontend": "All verified fix items pass (categories, role chip, saved tabs, profile stats, no crash on home feed with video). Video autoplay in web preview is not observed - noted as MEDIUM."},
+  "seed_data_creation": "Tests create/cleanup TEST_ collections, TEST_ posts, TEST_priv_/TEST_hidden_ user registrations, TESTStyle_ entries. Registered TEST_ users are NOT deleted (no delete-user endpoint). Re-run seed.py for a clean state.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes the two style-search issues (auto-populate style_name from style_names[0] AND add style_names to search or_clauses), re-run pytest backend/tests/test_iteration3_fixes.py::TestCreatePostCustom - both assertions should then pass. Followers/following, privacy, collections many-to-many, styles normalization, categories - all verified end-to-end. Video autoplay would need a native/device test to fully confirm; web preview shows paused state but code path is correct.",
+  "rca_of_issue": "Root cause of the failing test: POST /api/posts explicitly maps body.style_name and body.style_names separately without deriving one from the other (server.py:505-506). The frontend create.tsx new step-4 emits multiple tags via style_names[] with an empty style_name. Then /api/search (server.py:1074-1078) only regex-matches the scalar style_name field. Two-line fix on the backend (derive style_name if empty; add style_names to or_clauses)."
+}

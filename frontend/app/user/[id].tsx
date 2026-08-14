@@ -54,8 +54,8 @@ export default function UserProfile() {
         {profile.bio ? <Text style={[type.body, { textAlign: "center", marginTop: spacing.sm, paddingHorizontal: spacing.xl }]}>{profile.bio}</Text> : null}
         <View style={styles.stats}>
           <Text style={styles.stat}><Text style={styles.statN}>{profile.post_count}</Text> posts</Text>
-          <Text style={styles.stat}><Text style={styles.statN}>{profile.followers}</Text> followers</Text>
-          <Text style={styles.stat}><Text style={styles.statN}>{profile.following}</Text> following</Text>
+          <Pressable testID="user-followers" onPress={() => router.push(`/connections/${profile.id}?type=followers`)}><Text style={styles.stat}><Text style={styles.statN}>{profile.followers}</Text> followers</Text></Pressable>
+          <Pressable testID="user-following" onPress={() => router.push(`/connections/${profile.id}?type=following`)}><Text style={styles.stat}><Text style={styles.statN}>{profile.following}</Text> following</Text></Pressable>
         </View>
         {!isMe && (
           <Btn testID="user-follow" label={following ? "Following" : "Follow"} variant={following ? "outline" : "primary"} onPress={toggleFollow} style={{ marginTop: spacing.lg, width: 200, height: 44 }} />

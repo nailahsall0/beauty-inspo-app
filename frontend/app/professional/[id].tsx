@@ -90,7 +90,7 @@ export default function ProfessionalProfile() {
 
           <View style={styles.statsRow}>
             <Text style={styles.stat}><Text style={styles.statN}>{pro.post_count}</Text> looks</Text>
-            <Text style={styles.stat}><Text style={styles.statN}>{pro.followers}</Text> followers</Text>
+            <Pressable testID="pro-followers" onPress={() => router.push(`/connections/${pro.user_id}?type=followers`)}><Text style={styles.stat}><Text style={styles.statN}>{pro.followers}</Text> followers</Text></Pressable>
           </View>
 
           {/* Social + follow */}

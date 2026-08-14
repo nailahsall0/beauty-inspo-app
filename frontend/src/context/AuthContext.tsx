@@ -14,6 +14,7 @@ export type User = {
   is_professional: boolean;
   professional_id?: string | null;
   interests: string[];
+  profile_public?: boolean;
   email?: string;
 };
 

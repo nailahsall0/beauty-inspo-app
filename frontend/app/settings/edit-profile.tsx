@@ -22,6 +22,7 @@ export default function EditProfile() {
   const [city, setCity] = useState(user?.city || "");
   const [state, setState] = useState(user?.state || "");
   const [avatar, setAvatar] = useState(user?.avatar_url || "");
+  const [isPublic, setIsPublic] = useState(!!user?.profile_public);
   const [saving, setSaving] = useState(false);
 
   const pickAvatar = async () => {
@@ -39,7 +40,7 @@ export default function EditProfile() {
   const save = async () => {
     setSaving(true);
     try {
-      await apiFetch("/users/me", { method: "PUT", body: { display_name: name.trim(), username: username.trim(), bio, city, state, avatar_url: avatar } });
+      await apiFetch("/users/me", { method: "PUT", body: { display_name: name.trim(), username: username.trim(), bio, city, state, avatar_url: avatar, profile_public: isPublic } });
       await refresh();
       toast.show("Profile saved", "success");
       router.back();
@@ -68,6 +69,17 @@ export default function EditProfile() {
           <View style={{ flex: 1 }}><F label="City" value={city} onChange={setCity} testID="edit-city" /></View>
           <View style={{ width: 90 }}><F label="State" value={state} onChange={setState} testID="edit-state" /></View>
         </View>
+
+        {!user?.is_professional && (
+          <Pressable testID="edit-privacy-toggle" onPress={() => setIsPublic((v) => !v)} style={styles.privacyRow}>
+            <MaterialCommunityIcons name={isPublic ? "earth" : "lock-outline"} size={22} color={colors.brandDeep} />
+            <View style={{ flex: 1, marginLeft: spacing.md }}>
+              <Text style={styles.privacyTitle}>{isPublic ? "Public profile" : "Private profile"}</Text>
+              <Text style={styles.privacySub}>{isPublic ? "Anyone can find and view your profile and looks." : "Only you can see your profile; hidden from discovery."}</Text>
+            </View>
+            <MaterialCommunityIcons name={isPublic ? "toggle-switch" : "toggle-switch-off-outline"} size={34} color={isPublic ? colors.brandDeep : colors.faint} />
+          </Pressable>
+        )}
       </KeyboardAwareScrollView>
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         <Btn testID="edit-profile-save" label="Save Changes" onPress={save} loading={saving} />
@@ -91,6 +103,9 @@ const styles = StyleSheet.create({
   avatarWrap: { alignSelf: "center", marginBottom: spacing.xl },
   avatarEdit: { position: "absolute", bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: colors.brandDeep, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.surface },
   label: { fontFamily: font.semibold, fontSize: 13, color: colors.onSurface, marginBottom: 6 },
+  privacyRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.sm, borderWidth: 1, borderColor: colors.border },
+  privacyTitle: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
+  privacySub: { fontFamily: font.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 50, fontFamily: font.medium, fontSize: 15, color: colors.onSurface, borderWidth: 1, borderColor: colors.border },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
 });

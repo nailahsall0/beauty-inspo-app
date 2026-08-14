@@ -10,7 +10,47 @@ import { MasonryFeed, Post } from "@/src/components/Feed";
 import { Loading, EmptyState, Btn } from "@/src/components/ui";
 import { useToast } from "@/src/components/Toast";
 
-type Collection = { id: string; name: string; cover_url?: string | null; post_count: number };
+type Collection = { id: string; name: string; cover_url?: string | null; thumbs?: string[]; post_count: number };
+
+function CollectionThumb({ thumbs }: { thumbs: string[] }) {
+  const t = (thumbs || []).slice(0, 4);
+  if (t.length === 0) {
+    return <MaterialCommunityIcons name="folder-image" size={32} color={colors.faint} />;
+  }
+  if (t.length === 1) {
+    return <Image source={{ uri: mediaUrl(t[0]) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />;
+  }
+  if (t.length === 2) {
+    return (
+      <View style={{ flex: 1, flexDirection: "row", gap: 2 }}>
+        {t.map((u, i) => <Image key={i} source={{ uri: mediaUrl(u) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />)}
+      </View>
+    );
+  }
+  if (t.length === 3) {
+    return (
+      <View style={{ flex: 1, flexDirection: "row", gap: 2 }}>
+        <Image source={{ uri: mediaUrl(t[0]) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Image source={{ uri: mediaUrl(t[1]) }} style={{ flex: 1, width: "100%" }} contentFit="cover" />
+          <Image source={{ uri: mediaUrl(t[2]) }} style={{ flex: 1, width: "100%" }} contentFit="cover" />
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={{ flex: 1, gap: 2 }}>
+      <View style={{ flex: 1, flexDirection: "row", gap: 2 }}>
+        <Image source={{ uri: mediaUrl(t[0]) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />
+        <Image source={{ uri: mediaUrl(t[1]) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />
+      </View>
+      <View style={{ flex: 1, flexDirection: "row", gap: 2 }}>
+        <Image source={{ uri: mediaUrl(t[2]) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />
+        <Image source={{ uri: mediaUrl(t[3]) }} style={{ flex: 1, height: "100%" }} contentFit="cover" />
+      </View>
+    </View>
+  );
+}
 
 export default function Saved() {
   const insets = useSafeAreaInsets();
@@ -117,11 +157,7 @@ export default function Saved() {
                   style={styles.colCard}
                 >
                   <View style={styles.colCover}>
-                    {c.cover_url ? (
-                      <Image source={{ uri: mediaUrl(c.cover_url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
-                    ) : (
-                      <MaterialCommunityIcons name="folder-image" size={32} color={colors.faint} />
-                    )}
+                    <CollectionThumb thumbs={c.thumbs || (c.cover_url ? [c.cover_url] : [])} />
                   </View>
                   <Text style={styles.colName} numberOfLines={1}>
                     {c.name}

@@ -51,7 +51,7 @@ STYLES = ["Boho", "Chrome French Tip", "Wispy Cat Eye", "Soft Glam", "Natural", 
           "Minimal", "Editorial", "Bridal", "Vacation", "Ombre", "Jumbo"]
 
 IMG = {
-    "hair1": "https://images.unsplash.com/photo-1595475207225-428b62bda831?w=800&q=80",
+    "hair1": "https://images.unsplash.com/photo-1522337094846-8a818192de1f?w=800&q=80",
     "hair2": "https://images.unsplash.com/photo-1519699047748-de8e457a634e?w=800&q=80",
     "makeup1": "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&q=80",
     "makeup2": "https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&q=80",

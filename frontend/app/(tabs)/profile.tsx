@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useRef } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +16,8 @@ export default function Profile() {
   const [stats, setStats] = useState({ followers: 0, following: 0, post_count: 0 });
   const [posts, setPosts] = useState<Post[]>([]);
   const [verification, setVerification] = useState<string | undefined>();
+  const scrollRef = useRef<ScrollView>(null);
+  const looksY = useRef(0);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -46,6 +48,7 @@ export default function Profile() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={{ flex: 1, backgroundColor: colors.surface }}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: spacing.xxxl }}
@@ -88,9 +91,9 @@ export default function Profile() {
         ) : null}
 
         <View style={styles.statsRow}>
-          <Stat n={stats.post_count} label="Posts" />
-          <Stat n={stats.followers} label="Followers" />
-          <Stat n={stats.following} label="Following" />
+          <Stat n={stats.post_count} label="Posts" onPress={() => looksY.current && scrollRef.current?.scrollTo({ y: looksY.current - 20, animated: true })} testID="profile-stat-posts" />
+          <Stat n={stats.followers} label="Followers" onPress={() => router.push(`/connections/${user.id}?type=followers`)} testID="profile-stat-followers" />
+          <Stat n={stats.following} label="Following" onPress={() => router.push(`/connections/${user.id}?type=following`)} testID="profile-stat-following" />
         </View>
 
         <View style={styles.actions}>
@@ -114,7 +117,7 @@ export default function Profile() {
         )}
       </View>
 
-      <View style={styles.postsHeader}>
+      <View style={styles.postsHeader} onLayout={(e) => { looksY.current = e.nativeEvent.layout.y; }}>
         <Text style={styles.sectionTitle}>My Looks</Text>
       </View>
       {posts.length ? (
@@ -126,12 +129,12 @@ export default function Profile() {
   );
 }
 
-function Stat({ n, label }: { n: number; label: string }) {
+function Stat({ n, label, onPress, testID }: { n: number; label: string; onPress?: () => void; testID?: string }) {
   return (
-    <View style={styles.stat}>
+    <Pressable style={styles.stat} onPress={onPress} testID={testID}>
       <Text style={styles.statN}>{n}</Text>
       <Text style={styles.statL}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 

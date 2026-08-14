@@ -27,9 +27,17 @@ Mobile-first beauty discovery platform connecting beauty inspiration with local 
 - Admin: overview stats, verify pros, resolve reports, add categories/styles.
 - Seed: 8 categories, 35 services, 12 styles, 5 accounts, 8 posts, sample tag/collection/notification.
 
+## Implemented — Iteration 3 (UI/Profile/Collections/Create audit)
+- Home feed: photo-only tiles; **video posts autoplay muted + loop** with no play-icon overlay (expo-video).
+- Profile: **followers/following counts open real lists** (`/connections/[id]`); **posts count scrolls to Looks**; "Client"/"Professional" role chip; interests removed from profile (used only for Home).
+- Privacy: `profile_public` on users — clients default **private** (gated from discovery), pros public; toggle in Edit Profile.
+- Collections: proper **many-to-many** (`collection_items`); **press-and-hold / folder icon** on a post opens a SaveSheet to add to one or many collections or create new; tap = quick save; **Pinterest-style 1/2/3/2×2 thumbnails** that auto-update.
+- Create post: **custom "Other" category** input, **custom/Other service** input (never a dead end), and **searchable style tags** with create-custom + multi-select.
+- Styles are **structured & normalized** (id, name, searchable_name, usage_count, category_id, created_by, created_at) — Boho/boho/BOHO dedupe.
+- Removed leftover test categories from DB. Search matches style_names[] + custom_category.
+
 ## Backlog (P1/P2)
-- P1: Save-to-specific-collection picker in post detail; OS-native share sheet; edit/delete own posts from UI.
-- P1: Location distance filters (5/10/25/50 mi) UI on Discover professionals tab.
+- P1: OS-native share sheet; edit/delete own posts from UI; location distance filters (5/10/25/50 mi) on Discover.
 - P2: Reviews, native booking, messaging (architecture-ready), AI "Find this look".
 - P2: Split server.py into routers; richer professional post form.
 
