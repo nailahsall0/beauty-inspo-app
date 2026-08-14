@@ -264,6 +264,10 @@ export default function CreatePost() {
           <View>
             <Text style={styles.stepTitle}>Add details</Text>
             <Text style={type.body}>All optional. Helps others recreate the look.</Text>
+            <View style={styles.hint}>
+              <MaterialCommunityIcons name="lightbulb-on-outline" size={16} color={colors.brandDeep} />
+              <Text style={styles.hintText}>Filling out these details helps future clients find and recreate this look — and helps pros get discovered.</Text>
+            </View>
             {ATTR_FIELDS.map((f) => (
               <View key={f} style={{ marginTop: spacing.md }}>
                 <Text style={styles.fieldLabel}>{f}</Text>
@@ -362,6 +366,8 @@ const styles = StyleSheet.create({
   progressFill: { height: 3, backgroundColor: colors.brandDeep, borderRadius: 2 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxxl },
   stepTitle: { fontFamily: font.displaySemi, fontSize: 26, color: colors.onSurface, marginBottom: spacing.xs },
+  hint: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, backgroundColor: colors.brandTertiary, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md },
+  hintText: { flex: 1, fontFamily: font.medium, fontSize: 12.5, lineHeight: 18, color: colors.brandDeep },
   mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, marginTop: spacing.lg },
   mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary },
   removeMedia: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },

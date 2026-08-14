@@ -78,11 +78,12 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
   );
 }
 
-export function MasonryFeed({ posts, containerWidth }: { posts: Post[]; containerWidth?: number }) {
+export function MasonryFeed({ posts, containerWidth, tight }: { posts: Post[]; containerWidth?: number; tight?: boolean }) {
   const { width: winW } = useWindowDimensions();
   const totalW = containerWidth ?? winW;
-  const gap = spacing.md;
-  const colW = (totalW - spacing.lg * 2 - gap) / 2;
+  const pad = tight ? spacing.sm : spacing.lg;
+  const gap = tight ? spacing.sm : spacing.md;
+  const colW = (totalW - pad * 2 - gap) / 2;
   const cols: Post[][] = [[], []];
   const heights = [0, 0];
   posts.forEach((p) => {
@@ -94,7 +95,7 @@ export function MasonryFeed({ posts, containerWidth }: { posts: Post[]; containe
     heights[idx] += h + gap;
   });
   return (
-    <View style={styles.masonry}>
+    <View style={[styles.masonry, { paddingHorizontal: pad, gap }]}>
       {cols.map((col, i) => (
         <View key={i} style={{ width: colW, gap }}>
           {col.map((p) => (
