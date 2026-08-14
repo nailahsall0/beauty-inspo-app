@@ -120,18 +120,31 @@ export default function ProfessionalProfile() {
 
           {tab === "portfolio" ? (
             posts.length ? (
-              <View style={styles.grid}>
-                {posts.map((p) => (
-                  <Pressable key={p.id} testID={`portfolio-${p.id}`} onPress={() => router.push(`/post/${p.id}`)} style={{ width: gridSize, height: gridSize, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary }}>
-                    <Image source={{ uri: mediaUrl(p.media?.[0]?.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
-                  </Pressable>
-                ))}
+              <View>
+                {isOwn && (
+                  <Btn testID="pro-add-look" label="Add Look to Portfolio" variant="secondary" icon="plus" onPress={() => router.push("/create")} style={{ height: 46, marginBottom: spacing.lg }} />
+                )}
+                <View style={styles.grid}>
+                  {posts.map((p) => (
+                    <Pressable key={p.id} testID={`portfolio-${p.id}`} onPress={() => router.push(`/post/${p.id}`)} style={{ width: gridSize, height: gridSize, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary }}>
+                      <Image source={{ uri: mediaUrl(p.media?.[0]?.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             ) : (
-              <EmptyState icon="image-outline" title="No portfolio yet" />
+              <EmptyState
+                icon="image-outline"
+                title="No portfolio yet"
+                subtitle={isOwn ? "Share your work so clients can see what you do." : undefined}
+                action={isOwn ? <Btn testID="pro-add-look-empty" label="Add Look" icon="plus" onPress={() => router.push("/create")} /> : undefined}
+              />
             )
           ) : (
             <View style={{ gap: spacing.sm }}>
+              {isOwn && (
+                <Btn testID="pro-manage-services" label="Add / Manage Services" variant="secondary" icon="pencil-outline" onPress={() => router.push("/professional/edit")} style={{ height: 46, marginBottom: spacing.sm }} />
+              )}
               {pro.services?.length ? (
                 pro.services.map((s: any) => (
                   <View key={s.id} style={styles.serviceRow}>
@@ -143,7 +156,7 @@ export default function ProfessionalProfile() {
                   </View>
                 ))
               ) : (
-                <EmptyState icon="tag-outline" title="No services listed yet" />
+                <EmptyState icon="tag-outline" title="No services listed yet" subtitle={isOwn ? "Add the services you offer with pricing." : undefined} />
               )}
             </View>
           )}

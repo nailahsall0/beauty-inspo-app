@@ -136,7 +136,7 @@ export default function PostDetail() {
             <Avatar uri={post.author?.avatar_url} name={post.author?.display_name} size={40} />
             <View style={{ flex: 1, marginLeft: spacing.md }}>
               <Text style={styles.authorName}>{post.author?.display_name}</Text>
-              <Text style={styles.authorHandle}>@{post.author?.username} · {post.post_type === "professional" ? "Pro" : "Customer"}</Text>
+              <Text style={styles.authorHandle}>@{post.author?.username} · {post.post_type === "professional" ? "Pro" : "Client"}</Text>
             </View>
           </Pressable>
 
@@ -296,10 +296,10 @@ function post_tag_confirmed(post: any) {
 function PostVideo({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
-    p.muted = true;
+    p.muted = false;
     p.play();
   });
-  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls allowsFullscreen />;
 }
 
 function DetailRow({ label, value }: { label: string; value?: string | null }) {

@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -179,6 +179,36 @@ async def enrich_post(post: dict, viewer: Optional[dict]) -> dict:
         post["liked"] = bool(await db.likes.find_one({"post_id": post["id"], "user_id": viewer["id"]}))
         post["saved"] = bool(await db.saves.find_one({"post_id": post["id"], "user_id": viewer["id"]}))
     return post
+
+
+async def enrich_posts(posts: list, viewer: Optional[dict]) -> list:
+    """Batch enrichment to avoid N+1 queries (production-efficient)."""
+    if not posts:
+        return []
+    author_ids = list({p["author_id"] for p in posts})
+    pro_ids = list({p["tagged_professional_id"] for p in posts if p.get("tagged_professional_id")})
+    authors = {u["id"]: u for u in await db.users.find({"id": {"$in": author_ids}}, {"_id": 0}).to_list(len(author_ids))}
+    pros = {}
+    if pro_ids:
+        pros = {pr["id"]: pr for pr in await db.professional_profiles.find({"id": {"$in": pro_ids}}, {"_id": 0}).to_list(len(pro_ids))}
+    liked_ids: set = set()
+    saved_ids: set = set()
+    if viewer:
+        post_ids = [p["id"] for p in posts]
+        liked_ids = {l["post_id"] for l in await db.likes.find({"user_id": viewer["id"], "post_id": {"$in": post_ids}}, {"_id": 0, "post_id": 1}).to_list(len(post_ids))}
+        saved_ids = {s["post_id"] for s in await db.saves.find({"user_id": viewer["id"], "post_id": {"$in": post_ids}}, {"_id": 0, "post_id": 1}).to_list(len(post_ids))}
+    for p in posts:
+        a = authors.get(p["author_id"])
+        p["author"] = public_user(a) if a else None
+        p["tagged_professional"] = None
+        pid = p.get("tagged_professional_id")
+        if pid and pid in pros:
+            pr = pros[pid]
+            p["tagged_professional"] = {"id": pr["id"], "username": pr["username"], "business_name": pr["business_name"],
+                                        "avatar_url": pr.get("avatar_url"), "verification_status": pr.get("verification_status")}
+        p["liked"] = p["id"] in liked_ids
+        p["saved"] = p["id"] in saved_ids
+    return posts
 
 
 # ------------------------- Models -------------------------
@@ -429,7 +459,7 @@ async def feed(feed_type: str = "foryou", category_id: Optional[str] = None,
     posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
     if feed_type == "nearby" and viewer and viewer.get("city"):
         posts.sort(key=lambda p: 0 if (p.get("city") == viewer.get("city")) else 1)
-    return [await enrich_post(p, viewer) for p in posts]
+    return await enrich_posts(posts, viewer)
 
 
 @api.get("/posts/{post_id}")
@@ -479,7 +509,7 @@ async def user_posts(user_id: str, viewer: Optional[dict] = Depends(get_optional
     if not u:
         raise HTTPException(404, "User not found")
     posts = await db.posts.find({"author_id": u["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return [await enrich_post(p, viewer) for p in posts]
+    return await enrich_posts(posts, viewer)
 
 
 # ------------------------- Likes -------------------------
@@ -580,7 +610,7 @@ async def get_saved(viewer: dict = Depends(get_current_user)):
     posts = await db.posts.find({"id": {"$in": ids}}, {"_id": 0}).to_list(500)
     pmap = {p["id"]: p for p in posts}
     ordered = [pmap[i] for i in ids if i in pmap]
-    return [await enrich_post(p, viewer) for p in ordered]
+    return await enrich_posts(ordered, viewer)
 
 
 @api.get("/collections")
@@ -619,7 +649,7 @@ async def collection_posts(cid: str, viewer: dict = Depends(get_current_user)):
     saves = await db.saves.find({"collection_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
     ids = [s["post_id"] for s in saves]
     posts = await db.posts.find({"id": {"$in": ids}}, {"_id": 0}).to_list(500)
-    return [await enrich_post(p, viewer) for p in posts]
+    return await enrich_posts(posts, viewer)
 
 
 # ------------------------- Follows -------------------------
@@ -720,7 +750,7 @@ async def pro_posts(pro_id: str, viewer: Optional[dict] = Depends(get_optional_u
     if not pro:
         raise HTTPException(404, "Professional not found")
     posts = await db.posts.find({"author_id": pro["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return [await enrich_post(p, viewer) for p in posts]
+    return await enrich_posts(posts, viewer)
 
 
 @api.post("/professional/verification/request")
@@ -897,20 +927,36 @@ async def search_professionals(q: Optional[str] = None, category_id: Optional[st
 async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
     await log_event("SEARCH", viewer["id"] if viewer else None, metadata={"q": q})
     ql = q.lower().strip()
+    import re as _re
+    rx = _re.escape(q.strip())
     services = await db.services.find({"active": True}, {"_id": 0}).to_list(500)
     styles = await db.styles.find({"active": True}, {"_id": 0}).to_list(500)
+    categories = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
     suggestions = [s["name"] for s in services if ql in s["name"].lower()][:5] + \
-                  [s["name"] for s in styles if ql in s["name"].lower()][:5]
-    posts = await db.posts.find({"$or": [
-        {"caption": {"$regex": q, "$options": "i"}},
-        {"service_name": {"$regex": q, "$options": "i"}},
-        {"style_name": {"$regex": q, "$options": "i"}},
-    ]}, {"_id": 0}).sort("created_at", -1).to_list(30)
+                  [s["name"] for s in styles if ql in s["name"].lower()][:5] + \
+                  [c["name"] for c in categories if ql in c["name"].lower()][:3]
+    # category ids whose name matches the query
+    cat_ids = [c["id"] for c in categories if ql in c["name"].lower()]
+    # author ids whose username/display name matches
+    matched_users = await db.users.find(
+        {"$or": [{"username": {"$regex": rx, "$options": "i"}}, {"display_name": {"$regex": rx, "$options": "i"}}]},
+        {"_id": 0, "id": 1}).to_list(50)
+    author_ids = [u["id"] for u in matched_users]
+    or_clauses = [
+        {"caption": {"$regex": rx, "$options": "i"}},
+        {"service_name": {"$regex": rx, "$options": "i"}},
+        {"style_name": {"$regex": rx, "$options": "i"}},
+    ]
+    if cat_ids:
+        or_clauses.append({"category_id": {"$in": cat_ids}})
+    if author_ids:
+        or_clauses.append({"author_id": {"$in": author_ids}})
+    posts = await db.posts.find({"$or": or_clauses}, {"_id": 0}).sort("created_at", -1).to_list(40)
     pros = await search_professionals(q=q, viewer=viewer)
     matched_services = [s for s in services if ql in s["name"].lower()][:10]
     return {
         "suggestions": list(dict.fromkeys(suggestions))[:8],
-        "posts": [await enrich_post(p, viewer) for p in posts],
+        "posts": await enrich_posts(posts, viewer),
         "professionals": pros[:10],
         "services": matched_services,
     }
@@ -977,11 +1023,34 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
 
 @api.get("/files/{path:path}")
 async def get_file(path: str):
+    def _open():
+        global _storage_key
+        key = init_storage()
+        r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
+        if r.status_code == 503:
+            _storage_key = None
+            key = init_storage()
+            r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
+        r.raise_for_status()
+        return r
     try:
-        content, ctype = await run_in_threadpool(get_object, path)
+        resp = await run_in_threadpool(_open)
     except Exception:
         raise HTTPException(404, "File not found")
-    return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=31536000"})
+    ctype = resp.headers.get("Content-Type", "application/octet-stream")
+
+    def stream():
+        try:
+            for chunk in resp.iter_content(64 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            resp.close()
+
+    headers = {"Cache-Control": "public, max-age=31536000"}
+    if resp.headers.get("Content-Length"):
+        headers["Content-Length"] = resp.headers["Content-Length"]
+    return StreamingResponse(stream(), media_type=ctype, headers=headers)
 
 
 # ------------------------- Admin -------------------------

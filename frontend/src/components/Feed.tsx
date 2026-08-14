@@ -1,12 +1,10 @@
 import React from "react";
-import { View, Text, Pressable, StyleSheet, useWindowDimensions } from "react-native";
+import { View, Pressable, StyleSheet, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { colors, spacing, radius, font } from "@/src/theme/tokens";
+import { colors, spacing, radius } from "@/src/theme/tokens";
 import { mediaUrl } from "@/src/lib/api";
-import { Avatar, VerifiedBadge } from "@/src/components/ui";
 
 export type Post = {
   id: string;
@@ -39,40 +37,16 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
       style={styles.card}
     >
       <View style={{ width, height: h, backgroundColor: colors.surfaceTertiary }}>
-        {url ? (
+        {first?.type === "video" ? (
+          <View style={styles.videoPlaceholder}>
+            {url ? <Image source={{ uri: url }} style={{ width: "100%", height: "100%", position: "absolute" }} contentFit="cover" /> : null}
+            <View style={styles.playCircle}>
+              <MaterialCommunityIcons name="play" size={26} color={colors.white} />
+            </View>
+          </View>
+        ) : url ? (
           <Image source={{ uri: url }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={250} />
         ) : null}
-        {first?.type === "video" && (
-          <View style={styles.videoTag}>
-            <MaterialCommunityIcons name="play" size={14} color={colors.white} />
-          </View>
-        )}
-        <LinearGradient colors={["transparent", "rgba(28,20,16,0.75)"]} style={styles.scrim} />
-        <View style={styles.overlay}>
-          {post.service_name ? (
-            <Text style={styles.serviceText} numberOfLines={1}>
-              {post.service_name}
-            </Text>
-          ) : null}
-          <View style={styles.metaRow}>
-            <Text style={styles.styleText} numberOfLines={1}>
-              {post.style_name || post.city || ""}
-            </Text>
-            {post.save_count > 0 && (
-              <View style={styles.saveChip}>
-                <MaterialCommunityIcons name="bookmark" size={11} color={colors.white} />
-                <Text style={styles.saveChipText}>{post.save_count}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </View>
-      <View style={styles.footer}>
-        <Avatar uri={post.author?.avatar_url} name={post.author?.display_name} size={22} />
-        <Text style={styles.authorText} numberOfLines={1}>
-          {post.author?.username ? `@${post.author.username}` : post.author?.display_name}
-        </Text>
-        {post.tagged_professional?.verification_status === "VERIFIED" && <VerifiedBadge status="VERIFIED" size={12} />}
       </View>
     </Pressable>
   );
@@ -117,20 +91,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   scrim: { position: "absolute", bottom: 0, left: 0, right: 0, height: "45%" },
-  overlay: { position: "absolute", bottom: 0, left: 0, right: 0, padding: spacing.md },
-  serviceText: { fontFamily: font.bold, fontSize: 14, color: colors.white },
-  metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 2 },
-  styleText: { fontFamily: font.medium, fontSize: 11, color: "rgba(255,255,255,0.85)", flexShrink: 1 },
-  saveChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    borderRadius: radius.pill,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  saveChipText: { fontFamily: font.semibold, fontSize: 10, color: colors.white },
+  videoPlaceholder: { width: "100%", height: "100%", backgroundColor: colors.onSurface, alignItems: "center", justifyContent: "center" },
+  playCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
   videoTag: {
     position: "absolute",
     top: spacing.sm,
@@ -142,6 +104,4 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  footer: { flexDirection: "row", alignItems: "center", padding: spacing.sm, gap: 6 },
-  authorText: { fontFamily: font.medium, fontSize: 12, color: colors.onSurfaceSecondary, flexShrink: 1 },
 });

@@ -58,7 +58,10 @@ class TestAuth:
             r = requests.post(f"{BASE}/auth/login", json={"email": email, "password": pw}, timeout=30)
             assert r.status_code == 200, f"{email}: {r.text}"
             d = r.json()
-            assert "access_token" in d and d["user"]["email"] == email
+            # public_user() intentionally excludes email now (PII fix); verify via /auth/me
+            assert "access_token" in d and d["user"].get("id")
+            me = requests.get(f"{BASE}/auth/me", headers=H(d["access_token"]), timeout=30).json()
+            assert me["email"] == email
 
     def test_login_bad_password(self):
         r = requests.post(f"{BASE}/auth/login", json={"email": MAYA[0], "password": "wrong"}, timeout=30)

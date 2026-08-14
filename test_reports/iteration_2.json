@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 2 verified all requested bug fixes. Backend: 20/20 new tests in test_iteration2_fixes.py PASS covering search (style/service/category/username), feed batch enrichment (author/tagged_professional/liked/saved), like/save reflection in feed, saved/collections/user-posts/pro-posts list enrichment, StreamingResponse upload+GET (image round-tripped bytes-perfect), bad-path 404, GET /professional/{id}, PUT /professional/me services update, and end-to-end 'create post -> search by style_name finds it'. Regression suite (backend_test.py) also green after adapting one assertion to the intentional PII fix (public_user() now excludes email). Frontend (mobile viewport 390x844): searching 'Boho' shows Boho Knotless + Boho suggestions and 2 Boho posts; 'Hair' shows Natural Hair Styling suggestion and Hair-category posts; 'braidsbykay' username returns 2 posts. Post detail with a video renders a native HTML5 <video> element with controls (contain fit, unmuted); customer post detail shows '@handle · Client' (0 'Customer' occurrences). Profile tab shows 'Professional' chip for Kay and 'Client' chip for Maya; interests are no longer displayed. Professional public page as OWNER (Kay logged in visiting /professional/braidsbykay) correctly shows testIDs pro-add-look ('Add Look to Portfolio' under Portfolio tab) and pro-manage-services ('Add / Manage Services' under Services & Pricing tab), plus View Analytics and Settings icon, with no Follow button. All primary bug fixes verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/auth/me", "issue": "Response omits 'professional_id' and 'is_professional' fields (both None) even though those fields exist on the seeded user document. The frontend relies on the login response's user object for owner detection; if the app is reloaded and only /auth/me is called, professional owner UI could break. Consider including professional_id and is_professional on /auth/me."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Discover / Search results / Home feed", "issues": [
+        "Seed image quality (pre-existing from iter 1): Boho posts still use unrelated watermelon stock photos and other posts show landscapes/buildings instead of beauty content. This directly harms the 'search finds my look' UX because thumbnails do not visually represent the style."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "StyleSheet - shadow* style props", "issue": "React Native Web logs '\"shadow*\" style props are deprecated. Use \"boxShadow\".' repeatedly on every screen. Pre-existing from iter 1 - migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to boxShadow (or gate with Platform.OS !== 'web')."},
+      {"component": "pointerEvents prop", "issue": "React Native Web logs 'props.pointerEvents is deprecated. Use style.pointerEvents'. Pre-existing from iter 1 - move pointerEvents into the style prop."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2_fixes.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter2_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Include 'professional_id' and 'is_professional' in GET /api/auth/me so owner detection survives a full reload / cold-start of the app.",
+    "(Pre-existing) Curate beauty-relevant seed images in /app/backend/seed.py to replace unrelated watermelon/landscape stock photos so search thumbnails actually represent Boho / Hair / etc.",
+    "(Pre-existing) Migrate shadow* -> boxShadow and pointerEvents -> style.pointerEvents in shared UI components to silence RN Web deprecation noise.",
+    "(Pre-existing minor) Consider requiring auth on POST /api/analytics/booking-click, and switch PUT /api/posts/{id} to a PATCH-style partial model."
+  ],
+  "critical_code_review_comments": [
+    "server.py is still ~1167 lines (>700 line guideline); consider splitting into routers (auth, posts, professional, admin, catalog, search).",
+    "Batch enrich_posts() correctly avoids the previous N+1 - looks good; scores well for both foryou/following/nearby and saved/collections/user/pro lists.",
+    "public_user() now correctly excludes 'email' (PII fix from iter 1). Consumers that relied on user.email in the login response were updated to use /auth/me.",
+    "Search endpoint properly regex-escapes the query (via re.escape) before building the $regex, avoiding regex injection."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2_fixes.py (new)",
+    "/app/backend/tests/backend_test.py (updated TestAuth.test_login_all_seeded to match public_user email removal)"
+  ],
+  "success_rate": {"backend": "100% new-fix tests (20/20); regression 34/35 in parallel run with 1 flaky race that passes standalone", "frontend": "100% on all verified fix items (search, video, terminology, role chip, pro self-management buttons)"},
+  "seed_data_creation": "Test suite creates and cleans up TEST_ posts / TEST_ collections / TEST_Service_A/B services (services restored to original after test). One tag-flow post + reports created by regression suite are not cleaned up (same as iter 1). Re-run seed.py for a clean state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All iteration-2 fixes verified end-to-end. Owner detection on /professional/[id] requires a fresh login (or /auth/me returning professional_id) - if you set localStorage manually the store won't rehydrate and 'Add Look' won't render. Search testable via /discover screen; suggestions include styles+services+categories. Video posts render <video controls>; the media URL is /api/files/... served via StreamingResponse. If retesting after main agent adds professional_id to /auth/me, retest owner detection after a hard reload of /professional/braidsbykay while logged in as kay.",
+  "rca_of_issue": "N/A - primary user-reported bug ('searching a style did not show what I posted') is fixed. Root cause of the original bug was the search endpoint only matching caption/service_name/style_name; the fix broadens matching to category names (via cat_ids lookup) and author usernames/display names (via matched_users lookup), and the new create-post -> search-by-style_name flow is now verified passing in the automated test test_search_user_finds_own_post_by_style."
+}

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch } from "@/src/lib/api";
-import { Avatar, Btn, Tag, VerifiedBadge, EmptyState } from "@/src/components/ui";
+import { Avatar, Btn, VerifiedBadge, EmptyState } from "@/src/components/ui";
 import { MasonryFeed, Post } from "@/src/components/Feed";
 import { useAuth } from "@/src/context/AuthContext";
 
@@ -71,6 +71,14 @@ export default function Profile() {
           <VerifiedBadge status={verification} size={18} />
         </View>
         <Text style={styles.username}>@{user.username}</Text>
+        <View style={styles.roleChip}>
+          <MaterialCommunityIcons
+            name={user.is_professional ? "star-four-points" : "account-heart-outline"}
+            size={13}
+            color={colors.brandDeep}
+          />
+          <Text style={styles.roleChipText}>{user.is_professional ? "Professional" : "Client"}</Text>
+        </View>
         {user.bio ? <Text style={[type.body, { textAlign: "center", marginTop: spacing.sm, paddingHorizontal: spacing.xl }]}>{user.bio}</Text> : null}
         {user.city ? (
           <View style={styles.locRow}>
@@ -94,12 +102,15 @@ export default function Profile() {
           )}
         </View>
 
-        {user.interests?.length > 0 && (
-          <View style={styles.interests}>
-            {user.interests.map((i) => (
-              <Tag key={i} label={i} />
-            ))}
-          </View>
+        {user.is_professional && (
+          <Btn
+            testID="profile-view-public"
+            label="View My Public Profile"
+            variant="secondary"
+            icon="account-eye-outline"
+            onPress={() => user.professional_id && router.push(`/professional/${user.professional_id}`)}
+            style={{ height: 46, marginTop: spacing.sm, width: "100%" }}
+          />
         )}
       </View>
 
@@ -132,6 +143,8 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.md },
   name: { fontFamily: font.displaySemi, fontSize: 26, color: colors.onSurface },
   username: { fontFamily: font.medium, fontSize: 14, color: colors.muted, marginTop: 2 },
+  roleChip: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandTertiary, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 5, marginTop: spacing.sm },
+  roleChipText: { fontFamily: font.bold, fontSize: 12, color: colors.brandDeep },
   locRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: spacing.sm },
   loc: { fontFamily: font.medium, fontSize: 13, color: colors.muted },
   statsRow: { flexDirection: "row", gap: spacing.xxl, marginTop: spacing.lg },
