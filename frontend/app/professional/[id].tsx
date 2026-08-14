@@ -55,7 +55,18 @@ export default function ProfessionalProfile() {
     Linking.openURL(pro.booking_url).catch(() => toast.show("Could not open link", "error"));
   };
 
-  const openSocial = (url: string) => Linking.openURL(url).catch(() => {});
+  const openUrl = (url: string) => Linking.openURL(url).catch(() => toast.show("Couldn't open link", "error"));
+
+  const handle = (v: string) => v.trim().replace(/^@/, "").replace(/\/+$/, "");
+  const instagramUrl = pro.instagram
+    ? (/^https?:\/\//i.test(pro.instagram) ? pro.instagram : `https://instagram.com/${handle(pro.instagram)}`)
+    : null;
+  const tiktokUrl = pro.tiktok
+    ? (/^https?:\/\//i.test(pro.tiktok) ? pro.tiktok : `https://tiktok.com/@${handle(pro.tiktok)}`)
+    : null;
+  const websiteUrl = pro.website
+    ? (/^https?:\/\//i.test(pro.website) ? pro.website : `https://${pro.website.trim()}`)
+    : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -101,9 +112,9 @@ export default function ProfessionalProfile() {
             {isOwn && (
               <Btn testID="pro-analytics" label="View Analytics" variant="outline" icon="chart-line" onPress={() => router.push("/professional/analytics")} style={{ flex: 1, height: 46 }} />
             )}
-            {pro.instagram ? <IconBtn icon="instagram" onPress={() => openSocial(`https://instagram.com/${pro.instagram}`)} bg={colors.surfaceSecondary} /> : null}
-            {pro.tiktok ? <IconBtn icon="music-note" onPress={() => openSocial(`https://tiktok.com/@${pro.tiktok}`)} bg={colors.surfaceSecondary} /> : null}
-            {pro.website ? <IconBtn icon="web" onPress={() => openSocial(pro.website)} bg={colors.surfaceSecondary} /> : null}
+            {instagramUrl ? <IconBtn testID="pro-social-instagram" icon="instagram" onPress={() => openUrl(instagramUrl)} bg={colors.surfaceSecondary} /> : null}
+            {tiktokUrl ? <IconBtn testID="pro-social-tiktok" icon="music-note" onPress={() => openUrl(tiktokUrl)} bg={colors.surfaceSecondary} /> : null}
+            {websiteUrl ? <IconBtn testID="pro-social-website" icon="web" onPress={() => openUrl(websiteUrl)} bg={colors.surfaceSecondary} /> : null}
           </View>
 
           {/* Tabs */}
