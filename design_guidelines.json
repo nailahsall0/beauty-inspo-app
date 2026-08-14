@@ -1,0 +1,166 @@
+{
+  "app_name": "brook.ie",
+  "personality": "3 Editorial Mobile LIGHT",
+  "personality_one_liner": "An elegant, calm, and editorial beauty discovery experience that blends warm neutrals with soft lavender and pink accents for a premium, non-techy feel.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#2C2421",
+    "surfaceSecondary": "#F5F2EA",
+    "onSurfaceSecondary": "#3A312E",
+    "surfaceTertiary": "#EAE4D9",
+    "onSurfaceTertiary": "#4A403C",
+    "surfaceInverse": "#2C2421",
+    "onSurfaceInverse": "#FDFBF7",
+    "brand": "#D6C5E3",
+    "brandPrimary": "#D6C5E3",
+    "onBrandPrimary": "#2C2421",
+    "brandSecondary": "#FFC8DD",
+    "onBrandSecondary": "#2C2421",
+    "brandTertiary": "#EADDF5",
+    "onBrandTertiary": "#2C2421",
+    "success": "#A3B899",
+    "onSuccess": "#1E2A15",
+    "warning": "#E8C881",
+    "onWarning": "#3A2A05",
+    "error": "#D18888",
+    "onError": "#3A1111",
+    "info": "#CDB4DB",
+    "onInfo": "#2C2421",
+    "border": "#EAE4D9",
+    "borderStrong": "#C5B2D4",
+    "divider": "#EAE4D9"
+  },
+  "typography": {
+    "displayFontFamily": "Cormorant Garamond",
+    "textFontFamily": "Satoshi",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24,
+      "3xl": 32
+    }
+  },
+  "spacing": {
+    "rule": "Generous editorial spacing. Emphasize whitespace around hero images and typography to maintain a calm, premium feel. Never crowd elements.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 4,
+    "md": 8,
+    "lg": 16,
+    "pill": 999
+  },
+  "shadow_tier": 0,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use subtle glassmorphism on the sticky 'Find Someone Who Can Do This' bottom sheet action bar.",
+      "Use glassmorphism for the bottom tab bar if content scrolls behind it."
+    ],
+    "dont's": [
+      "Avoid heavy blur on general cards or feed items; keep the main feed clean and editorial."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "Visual discovery feed where users browse beauty looks in a Pinterest-style masonry layout.",
+      "states": {
+        "loading": "Centered soft lavender spinner or masonry skeleton loader.",
+        "empty": "Illustration of a mirror with 'No looks found nearby. Try expanding your search.', plus a 'Clear Filters' CTA.",
+        "error": "Message 'Unable to load beauty feed.' with a 'Retry' button."
+      },
+      "layout": "Sticky Header: Search bar (pill shape, surfaceTertiary) + Horizontal ScrollView for category chips (Hair, Nails, Lashes, Makeup, Brows, Skincare). Main Content: 2-column masonry grid (e.g., using a masonry flashlist or similar pattern). Cards must preserve image aspect ratios. Overlay text on cards uses a gradient scrim (bottom 30%) to ensure text readability."
+    },
+    {
+      "name": "Post Detail (Bottom Sheet)",
+      "purpose": "Detailed view of a specific look, providing metadata and a path to book a professional.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "N/A (triggered from feed).",
+        "error": "Error loading post details."
+      },
+      "layout": "Large hero image of the beauty look at the top. Below: Editorial typography for style/service title. Distinct sections for Length / Size / Price / Location with clean dividers. Sticky bottom container over a glassmorphism background housing the 'Find Someone Who Can Do This' primary CTA (brandPrimary)."
+    },
+    {
+      "name": "Professional Profile",
+      "purpose": "Showcase a beauty professional's portfolio, services, and provide a frictionless booking CTA.",
+      "states": {
+        "loading": "Skeleton loader for profile header and portfolio grid.",
+        "empty": "No services listed yet.",
+        "error": "Unable to load professional profile."
+      },
+      "layout": "Header: Full-width cover image, overlapping circular avatar. Name in serif display font, verification badge next to name. Bio text. Body: Tabbed navigation ('Portfolio', 'Services & Pricing'). Portfolio uses a 3-column square grid. Services list uses list items with clear pricing on the right. Sticky bottom container with 'Book Appointment' CTA."
+    },
+    {
+      "name": "Create Post",
+      "purpose": "11-step flow for users/admins to upload and tag beauty looks.",
+      "states": {
+        "loading": "Saving post...",
+        "empty": "N/A",
+        "error": "Failed to publish post. Retry."
+      },
+      "layout": "Linear wizard layout. Top: Progress bar indicating step 1 to 11. Content area: Centered inputs, large tap targets for selecting categories/services. Bottom: Fixed 'Next' / 'Publish' CTA in brandSecondary or brandPrimary."
+    }
+  ],
+  "images": {
+    "hero_post_hair": {
+      "url": "https://images.unsplash.com/photo-1440589473619-3cde28941638?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwzfHxiZWF1dGlmdWwlMjBlbGVnYW50JTIwaGFpcnN0eWxlJTIwcG9ydHJhaXQlMjBtYWtldXB8ZW58MHx8fHwxNzg2NjY5NzI5fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Elegant blonde hairstyle portrait with red lipstick"
+    },
+    "hero_post_makeup": {
+      "url": "https://images.unsplash.com/photo-1603988089669-c041ac2fe196?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwyfHxiZWF1dGlmdWwlMjBlbGVnYW50JTIwaGFpcnN0eWxlJTIwcG9ydHJhaXQlMjBtYWtldXB8ZW58MHx8fHwxNzg2NjY5NzI5fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Beautiful elegant makeup portrait"
+    },
+    "hero_post_nails": {
+      "url": "https://images.unsplash.com/photo-1753285310651-6974a839c992?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxNzV8MHwxfHNlYXJjaHwyfHxlbGVnYW50JTIwbmFpbCUyMGFydCUyMG1hbmljdXJlJTIwY2xvc2V1cHxlbnwwfHx8fDE3ODY2Njk3Mjl8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Elegant nail art manicure closeup"
+    },
+    "professional_avatar": {
+      "url": "https://images.unsplash.com/photo-1593636677199-11450abb6e7b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwxfHxmZW1hbGUlMjBiZWF1dHklMjBwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMGVzdGhldGljaWFufGVufDB8fHx8MTc4NjY2OTcyOXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Female beauty professional portrait"
+    },
+    "professional_cover": {
+      "url": "https://images.unsplash.com/photo-1687293233752-ec42de2050db?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxmZW1hbGUlMjBiZWF1dHklMjBwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMGVzdGhldGljaWFufGVufDB8fHx8MTc4NjY2OTcyOXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Salon esthetician room background"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Editorial Mobile LIGHT personality. Do not inject tech/SaaS styles.",
+    "Use ONLY the defined color palette: Warm Ivory base, Dark Espresso text, with Soft Lavender (brandPrimary) and Soft Pink (brandSecondary) accents. No green, no generic blue/indigo.",
+    "The bottom tab bar must have a prominent center '+' Create button. Ensure safe area clearance for all bottom elements.",
+    "For the visual discovery feed, utilize a masonry layout that retains image aspect ratios (e.g., using @react-native-seoul/masonry-list or custom compositional columns).",
+    "Whenever text overlays an image (e.g., on feed cards or full-bleed headers), YOU MUST use a vertical gradient scrim (transparent to surfaceInverse) at the bottom 30-40% to guarantee readability.",
+    "For Professional Profile screens, implement a tab-based layout (Portfolio grid vs Services list) for clean content organization.",
+    "Sticky bottom CTAs ('Find Someone Who Can Do This', 'Book Appointment') must live outside the ScrollView, resting in a fixed bottom container, preferably with a glassmorphism blur backdrop."
+  ],
+  "haptics": {
+    "tab_press": "light",
+    "save_post": "medium",
+    "category_chip_select": "light",
+    "primary_cta_press": "heavy",
+    "stepper_next": "selection"
+  }
+}

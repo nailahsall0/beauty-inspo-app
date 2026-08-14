@@ -1,0 +1,59 @@
+{
+  "summary": "Comprehensive backend + frontend testing of brook.ie MVP. Backend: 35/35 pytest tests PASSED covering auth (register/login/me/update), catalog, feed (foryou/following/nearby), post CRUD, like/save/comment (with reply), follows, professional onboarding/profile/analytics, tag flow (create -> respond -> pro details), find-a-pro ranking (score ordering + reasons), professional search, collections CRUD with save-to-collection, search, notifications, reports, booking-click analytics, admin gating (403 for non-admin, all admin endpoints reachable for admin). Frontend: welcome/login flow works; customer maya lands in tabs (Home, Discover, Saved, Profile) with feed images, category chips, recommended pros; post detail loads with Find-a-Pro CTA which navigates to /find-pro/[id] showing ranked pros (Best match, Exact match, Style match, distance, starting price); professional public page /professional/braidsbykay renders with Portfolio/Services/Book Appointment; notifications populate; Kay's Pro Studio dashboard (dashboard/analytics/edit) works; admin overview with counts works. All auth, discovery, and pro flows are functional end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/analytics/booking-click", "issue": "Endpoint is unauthenticated (Optional viewer) - can be spammed to inflate professional's booking-clicks analytics counter"},
+      {"endpoint": "GET /api/files/{path}", "issue": "Publicly accessible with no auth - by design for image serving but any UUID path guess could enumerate uploads; consider signed URLs"},
+      {"endpoint": "PUT /api/posts/{id}", "issue": "Uses full PostIn body so caller must resend media/all fields even for a caption edit - not truly a PATCH"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "post detail screen", "issue": "'Find Someone Who Can Do This' CTA and comment input lack testID attributes (post-find-pro, post-comment). Only post-like and post-save are wired.", "testID": "post-find-pro, post-comment", "priority": "MEDIUM"},
+      {"component": "app/professional/index (missing)", "issue": "Navigating to /professional (no id) returns Expo Router 'Unmatched Route'. Either add an index redirect to /professional/dashboard or ensure nothing links there. Reference: /app/frontend/app/professional/", "testID": "", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Home feed / Discover / Post detail", "issues": [
+        "Seed image quality: several posts use stock photos that do not represent the beauty content - e.g. 'Knotless Braids' by @hairbyjane uses a photo of a woman by the ocean (no braids visible); 'Wispy Cat Eye - Volume' by @lashedbylexi uses a photo of a wooden A-frame building. This breaks the discovery experience since users cannot recognize the look. Curate beauty-specific seed images (see /app/backend/seed.py).",
+        "Professional cover on braidsbykay page is a salon interior which is fine, but portfolio thumbnails inherit the same off-topic sky/water image from her Fulani Braids post."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "Icons", "issue": "Icon names 'eyebrow' and 'sparkles' are not valid @expo/vector-icons material-community names - console emits repeated warnings on every render (Home, Discover). Use valid MCI names (e.g. 'eye-outline', 'star-four-points') or switch to Ionicons for these. Reference: seed data category icons in /app/backend/seed.py and their consumer in /app/frontend/app/(tabs)/index.tsx (category chips)."},
+      {"component": "StyleSheet - shadow* props", "issue": "React Native web logs: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Repeatedly in console. Migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to boxShadow for web or gate them behind Platform.OS !== 'web'."},
+      {"component": "pointerEvents prop", "issue": "React Native web warns 'props.pointerEvents is deprecated. Use style.pointerEvents'. Move pointerEvents into style prop."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Curate beauty-relevant seed images in /app/backend/seed.py (currently posts show unrelated landscape/architecture stock photos) and re-run seed.",
+    "Replace invalid material-community icon names ('eyebrow', 'sparkles') in seeded categories or map them client-side to valid icons.",
+    "Migrate shadow* style props to boxShadow (or wrap in Platform.select) and move pointerEvents into style prop to remove RN Web deprecation warnings.",
+    "Add testIDs to 'Find Someone Who Can Do This' button and comment input on post detail screen (post-find-pro, post-comment).",
+    "Add /app/frontend/app/professional/index.tsx that redirects to /(tabs)/profile or /professional/dashboard to avoid Unmatched Route.",
+    "Consider requiring auth on POST /api/analytics/booking-click to prevent spam of analytics counters.",
+    "Change PUT /api/posts/{id} to a partial update model so caption edits don't require resending media/attributes."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1096 lines - consider splitting into routers (auth, posts, professional, admin, catalog) for maintainability (>700 line guideline).",
+    "public_user() leaks the user's email to any caller of GET /api/users/{id} - this exposes PII of every user to any authenticated (or anon, with is_following=False path) requester. Remove 'email' from public_user() for non-self responses.",
+    "professional/onboard allows the caller to choose their pro username with no rate limiting or reservation of the personal @username; username collisions are checked but consider a global namespace across users+professionals.",
+    "find_professionals uses N+1 queries (per-pro post_count, aggregate for engagement). Fine for seeded 5 pros but will become slow; add caching or single aggregation pipeline.",
+    "No pagination on /posts/feed, /saved, /collections/{id}/posts, /notifications - hardcoded limits (40-500). Add cursor-based pagination.",
+    "JWT expiry is 43,200 minutes (30 days) - long-lived; consider shorter access token + refresh token."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new)"
+  ],
+  "success_rate": {"backend": "100% (35/35 pytest)", "frontend": "~90% - all core flows navigate & render; minor missing testIDs + seed image quality issues + RN deprecation warnings"},
+  "seed_data_creation": "No new seed data created. Registered a couple of TEST_ throwaway accounts inside pytest (test_register_and_me, test_onboard_new_pro, TEST Salon pro) - not cleaned up; recommend re-running seed.py if a clean state is desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend fully green via /app/backend/tests/backend_test.py. Frontend routes verified: /welcome, /login, /register, /(tabs)/index, /(tabs)/discover, /(tabs)/saved, /(tabs)/profile, /post/[id], /find-pro/[postId], /professional/[id|username], /professional/dashboard, /professional/analytics, /notifications, /admin. /professional (no id) is an Unmatched Route. Login credentials in /app/memory/test_credentials.md are valid. If retesting after image/icon fixes, focus on Home feed visuals and category chip icons.",
+  "rca_of_issue": "N/A - no blocking bugs. Findings are seed data quality, missing testIDs, missing /professional index route, and standard RN Web deprecation warnings, plus a PII leak (email in public_user) worth addressing."
+}
