@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, useWindowDimensions } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, useWindowDimensions, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -31,6 +31,7 @@ export default function PostDetail() {
   const [proDetailsInput, setProDetailsInput] = useState("");
   const [addingDetails, setAddingDetails] = useState(false);
   const [saveSheet, setSaveSheet] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +54,18 @@ export default function PostDetail() {
   const tagged = post.tagged_professional;
   const isTaggedPro = user?.professional_id && tagged?.id === user.professional_id;
   const canFindPro = !!(post.service_name || post.style_name);
+  const isAuthor = user?.id === post.author?.id;
+
+  const doDelete = async () => {
+    try {
+      await apiFetch(`/posts/${post.id}`, { method: "DELETE" });
+      setConfirmDelete(false);
+      toast.show("Post deleted", "success");
+      router.back();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to delete", "error");
+    }
+  };
 
   const toggleLike = async () => {
     if (!post) return;
@@ -127,7 +140,14 @@ export default function PostDetail() {
             <IconBtn icon="chevron-left" onPress={() => router.back()} bg="rgba(253,251,247,0.9)" />
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
               <IconBtn icon="share-variant-outline" onPress={() => toast.show("Share coming soon", "info")} bg="rgba(253,251,247,0.9)" />
-              <IconBtn icon="flag-outline" onPress={report} bg="rgba(253,251,247,0.9)" />
+              {isAuthor ? (
+                <>
+                  <IconBtn testID="post-edit" icon="pencil-outline" onPress={() => router.push(`/post/edit/${post.id}`)} bg="rgba(253,251,247,0.9)" />
+                  <IconBtn testID="post-delete" icon="trash-can-outline" onPress={() => setConfirmDelete(true)} bg="rgba(253,251,247,0.9)" />
+                </>
+              ) : (
+                <IconBtn testID="post-report" icon="flag-outline" onPress={report} bg="rgba(253,251,247,0.9)" />
+              )}
             </View>
           </View>
         </View>
@@ -297,6 +317,18 @@ export default function PostDetail() {
         onClose={() => setSaveSheet(false)}
         onChanged={() => setPost((p) => (p && !p.saved ? { ...p, saved: true, save_count: p.save_count + 1 } : p))}
       />
+
+      <Modal visible={confirmDelete} transparent animationType="fade" onRequestClose={() => setConfirmDelete(false)}>
+        <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmDelete(false)} />
+        <View style={styles.confirmCard} testID="delete-confirm">
+          <Text style={styles.confirmTitle}>Delete this post?</Text>
+          <Text style={styles.confirmSub}>This can't be undone. Your look will be removed for everyone.</Text>
+          <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
+            <Btn label="Cancel" variant="outline" onPress={() => setConfirmDelete(false)} style={{ flex: 1, height: 46 }} />
+            <Btn testID="delete-confirm-btn" label="Delete" variant="dark" onPress={doDelete} style={{ flex: 1, height: 46 }} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -360,4 +392,8 @@ const styles = StyleSheet.create({
   commentInputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   commentInput: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill, paddingHorizontal: spacing.lg, height: 44, fontFamily: font.medium, fontSize: 14, color: colors.onSurface },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandDeep, alignItems: "center", justifyContent: "center" },
+  confirmBackdrop: { flex: 1, backgroundColor: colors.scrim },
+  confirmCard: { position: "absolute", left: spacing.lg, right: spacing.lg, top: "40%", backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.xl },
+  confirmTitle: { fontFamily: font.displaySemi, fontSize: 22, color: colors.onSurface, marginBottom: spacing.xs },
+  confirmSub: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, color: colors.muted },
 });

@@ -558,9 +558,12 @@ async def update_post(post_id: str, body: PostIn, user: dict = Depends(get_curre
     if post["author_id"] != user["id"] and user["role"] != "admin":
         raise HTTPException(403, "Not allowed")
     updates = {"media": [m.dict() for m in body.media], "caption": body.caption or "",
-               "category_id": body.category_id, "service_id": body.service_id, "service_name": body.service_name,
-               "style_id": body.style_id, "style_name": body.style_name, "attributes": body.attributes,
-               "city": body.city, "state": body.state}
+               "category_id": body.category_id, "custom_category": body.custom_category,
+               "service_id": body.service_id, "service_name": body.service_name,
+               "style_id": body.style_id,
+               "style_name": body.style_name or (body.style_names[0] if body.style_names else None),
+               "style_names": body.style_names or ([body.style_name] if body.style_name else []),
+               "attributes": body.attributes, "city": body.city, "state": body.state}
     await db.posts.update_one({"id": post_id}, {"$set": updates})
     fresh = await db.posts.find_one({"id": post_id}, {"_id": 0})
     return await enrich_post(fresh, user)
