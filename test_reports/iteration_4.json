@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 4: Nearby tab feature validated end-to-end. Backend: 7/7 tests PASS in /app/backend/tests/test_nearby_feed.py — /posts/feed?feed_type=nearby returns a 'distance' field (miles) on every post, results are sorted ascending by distance, radius filter honored (r=50 excludes Columbus which sits ~100.4mi from Cincinnati; r=150 includes it), no-lat/lng fallback correctly uses viewer's saved coords (maya=Cincinnati) and produces distance-annotated distance-sorted posts, city-string fallback for viewer with no coords + no matching-city posts (admin=Dublin) returns []. Frontend (mobile 390x844): logged in as maya, tapped Nearby tab — permission-prompt card 'See pros near you' with 'Use my location' Pressable renders, 'Based on Cincinnati' status pill renders, radius chips 10/25/50/100 all present with 25 mi active by default, tapping chip 10 then 100 fires GET /api/posts/feed?feed_type=nearby&radius=10 and =100 (verified via request interception), 8 feed cards render. Admin (Dublin, no coords) Nearby tab renders 'Based on Dublin' + 'No pros nearby yet' empty state with 'Explore For You' CTA — matches spec exactly. Backend-frontend integration solid.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/posts/feed?feed_type=nearby", "issue": "Cincinnati->Columbus haversine yields ~100.4mi, so a Columbus post is JUST outside a radius=100 chip selection. This is arithmetically correct, but the user-visible expectation for a '100 mi' chip may be that a ~100mi city is included. Consider snapping radius comparison to <= radius + small epsilon (e.g. 1mi) or bumping the chip label; not a functional bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Home / Nearby", "issues": [
+        "(pre-existing from iter 3) shadow* props deprecation warning still emitted by React Native Web on every screen load.",
+        "(pre-existing from iter 3) props.pointerEvents deprecation warning."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "StyleSheet shadow* style props (pre-existing)", "issue": "React Native Web logs '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Reference: any screen using shadowColor/shadowOffset/shadowOpacity/shadowRadius."},
+      {"component": "pointerEvents prop (pre-existing)", "issue": "React Native Web logs 'props.pointerEvents is deprecated. Use style.pointerEvents'. Move pointerEvents into style object."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_nearby_feed.py",
+    "/app/test_reports/pytest/iter4_nearby.xml"
+  ],
+  "action_items": [
+    "(optional / minor) Consider treating the radius chip as inclusive at the label value (e.g. r=100 -> filter d <= 100.5 or d <= radius * 1.005) so a ~100.4mi Columbus post appears on the 100mi chip. Alternatively, adjust the Cincinnati/Columbus seed coords slightly to sit at ≤100mi if the desired UX is that Columbus surfaces at r=100.",
+    "(pre-existing) Migrate shadow* style props -> boxShadow (or Platform.OS==='web' guard) to silence RN Web deprecation warnings.",
+    "(pre-existing) Move pointerEvents from prop -> style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "_nearby_feed (server.py:554) cleanly separates the two fallback paths (coords vs. city string) and correctly returns [] when neither is available — matches spec.",
+    "_post_coords helper falls back to the tagged professional's coordinates when the post itself lacks lat/lng — this makes the nearby filter robust for posts that inherit location from a tagged pro.",
+    "Radius filter uses d <= radius which is strict; combined with the exact haversine calc, boundary cases (~radius mi) may feel unexpected to end users (see minor issue above).",
+    "Frontend index.tsx correctly re-runs load() via useCallback dep on [activeTab, coords, radiusMi], so both radius chip taps and permission-grant coord updates trigger a fresh /posts/feed fetch. Verified via network intercept.",
+    "NearbyControls correctly gates the 'Based on <city>' status on locState==='prompt'||'blocked' — will NOT show once permission is granted (replaced by 'Using your current location'). Good UX."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_nearby_feed.py (new — 7 tests)",
+    "/app/test_reports/iteration_4.json (this report)",
+    "/app/test_reports/pytest/iter4_nearby.xml (junit output)"
+  ],
+  "success_rate": {"backend": "7/7 (100%)", "frontend": "5/5 spec items verified — permission card, 'Based on <city>', radius chips render with 25mi active, chip tap refetches feed, empty state with prompt"},
+  "seed_data_creation": "No new seed data. Tests read only from existing seed (maya/admin/kay/pro accounts and their posts).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Nearby tab feature is production-ready. If retesting, note that the seeded Columbus post sits at ~100.4mi from Cincinnati — this is why r=50 excludes it (correct) and why r=100 chip does NOT include it (mathematically correct but potentially unexpected UX). Tests use r=150 to assert 'Columbus is included beyond 100mi'. Frontend can be re-verified quickly with maya (should show 8 posts + 'Based on Cincinnati' + prompt card since web permission is 'prompt') and admin (should show 'No pros nearby yet' + 'Based on Dublin').",
+  "rca_of_issue": "N/A — feature working as specified. Only minor UX consideration around the r=100 chip boundary (see backend_issues.minor)."
+}

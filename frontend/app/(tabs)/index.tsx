@@ -1,25 +1,36 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl } from "react-native";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "expo-router";
+import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, Linking } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors, spacing, font } from "@/src/theme/tokens";
+import * as Location from "expo-location";
+import { colors, spacing, font, radius as rad } from "@/src/theme/tokens";
 import { apiFetch } from "@/src/lib/api";
 import { MasonryFeed, Post } from "@/src/components/Feed";
 import { Loading, EmptyState, Btn } from "@/src/components/ui";
+import { useAuth } from "@/src/context/AuthContext";
 
 type Cat = { id: string; name: string; icon: string };
+type LocState = "idle" | "checking" | "granted" | "prompt" | "blocked";
+type Coords = { lat: number; lng: number };
+
+const RADIUS_OPTIONS = [10, 25, 50, 100];
 
 export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [cats, setCats] = useState<Cat[]>([]);
   const [activeTab, setActiveTab] = useState<string>("foryou");
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unread, setUnread] = useState(0);
+
+  // Nearby / location
+  const [locState, setLocState] = useState<LocState>("idle");
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const [radiusMi, setRadiusMi] = useState(25);
 
   const feedTabs = [
     { key: "foryou", label: "For You" },
@@ -37,6 +48,13 @@ export default function Home() {
         params.append("feed_type", "foryou");
         params.append("category_id", activeTab);
       }
+      if (activeTab === "nearby") {
+        params.append("radius", String(radiusMi));
+        if (coords) {
+          params.append("lat", String(coords.lat));
+          params.append("lng", String(coords.lng));
+        }
+      }
       const feed = await apiFetch<Post[]>(`/posts/feed?${params.toString()}`);
       setPosts(feed);
     } catch {
@@ -44,7 +62,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, coords, radiusMi]);
 
   useEffect(() => {
     apiFetch<Cat[]>("/categories", { auth: false }).then(setCats).catch(() => {});
@@ -61,11 +79,56 @@ export default function Home() {
     }, [])
   );
 
+  // Fetch the device position once we have permission.
+  const fetchPosition = useCallback(async () => {
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    } catch {
+      // Position unavailable — backend falls back to saved city.
+      setCoords(null);
+    }
+  }, []);
+
+  // Check existing permission when the Nearby tab is opened.
+  useEffect(() => {
+    if (activeTab !== "nearby") return;
+    (async () => {
+      setLocState("checking");
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (perm.granted) {
+        setLocState("granted");
+        await fetchPosition();
+      } else if (perm.canAskAgain) {
+        setLocState("prompt");
+      } else {
+        setLocState("blocked");
+      }
+    })();
+  }, [activeTab, fetchPosition]);
+
+  // User tapped "Use my location" — contextual request.
+  const requestLocation = useCallback(async () => {
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (perm.granted) {
+      setLocState("granted");
+      await fetchPosition();
+    } else if (perm.canAskAgain) {
+      setLocState("prompt");
+    } else {
+      setLocState("blocked");
+    }
+  }, [fetchPosition]);
+
   const onRefresh = async () => {
     setRefreshing(true);
+    if (activeTab === "nearby" && locState === "granted") await fetchPosition();
     await load();
     setRefreshing(false);
   };
+
+  const showNearbyControls = activeTab === "nearby";
+  const savedCity = user?.city || null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -98,18 +161,40 @@ export default function Home() {
         contentContainerStyle={{ paddingBottom: spacing.xxxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandDeep} />}
       >
+        {showNearbyControls && (
+          <NearbyControls
+            locState={locState}
+            coords={coords}
+            savedCity={savedCity}
+            radiusMi={radiusMi}
+            onSetRadius={setRadiusMi}
+            onRequest={requestLocation}
+            onOpenSettings={() => Linking.openSettings()}
+          />
+        )}
+
         {loading ? (
           <Loading />
         ) : posts.length === 0 ? (
           <EmptyState
-            icon="mirror"
-            title="No looks yet"
+            icon={activeTab === "nearby" ? "map-marker-off-outline" : "mirror"}
+            title={activeTab === "nearby" ? "No pros nearby yet" : "No looks yet"}
             subtitle={
-              activeTab === "following"
+              activeTab === "nearby"
+                ? coords || savedCity
+                  ? "Try widening your search radius above — there may be pros a little further out."
+                  : "Turn on location or set your city in your profile to find pros near you."
+                : activeTab === "following"
                 ? "Follow creators and pros to see their looks here."
                 : "Try a different category or check back soon."
             }
-            action={activeTab !== "foryou" ? <Btn label="Explore For You" onPress={() => setActiveTab("foryou")} variant="outline" /> : undefined}
+            action={
+              activeTab === "nearby" ? (
+                <Btn label="Explore For You" onPress={() => setActiveTab("foryou")} variant="outline" />
+              ) : activeTab !== "foryou" ? (
+                <Btn label="Explore For You" onPress={() => setActiveTab("foryou")} variant="outline" />
+              ) : undefined
+            }
           />
         ) : (
           <View style={{ marginTop: spacing.sm }}>
@@ -117,6 +202,88 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+function NearbyControls({
+  locState,
+  coords,
+  savedCity,
+  radiusMi,
+  onSetRadius,
+  onRequest,
+  onOpenSettings,
+}: {
+  locState: LocState;
+  coords: Coords | null;
+  savedCity: string | null;
+  radiusMi: number;
+  onSetRadius: (n: number) => void;
+  onRequest: () => void;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <View style={styles.nearbyWrap}>
+      {/* Permission prompt / status banner */}
+      {locState === "prompt" && (
+        <View style={styles.locCard}>
+          <MaterialCommunityIcons name="map-marker-radius-outline" size={22} color={colors.brandDeep} />
+          <View style={styles.locCardBody}>
+            <Text style={styles.locTitle}>See pros near you</Text>
+            <Text style={styles.locSub}>Share your location to find beauty pros who can recreate these looks nearby.</Text>
+            <Pressable testID="nearby-enable" onPress={onRequest} style={styles.locBtn}>
+              <Text style={styles.locBtnText}>Use my location</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {locState === "blocked" && (
+        <View style={styles.locCard}>
+          <MaterialCommunityIcons name="map-marker-off-outline" size={22} color={colors.brandDeep} />
+          <View style={styles.locCardBody}>
+            <Text style={styles.locTitle}>Location is off</Text>
+            <Text style={styles.locSub}>
+              {savedCity
+                ? `Showing pros around ${savedCity} from your profile. Enable location for exact results.`
+                : "Enable location in Settings, or set your city in your profile, to find pros near you."}
+            </Text>
+            <Pressable testID="nearby-open-settings" onPress={onOpenSettings} style={styles.locBtn}>
+              <Text style={styles.locBtnText}>Open Settings</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {locState === "granted" && coords && (
+        <View style={styles.locStatusRow}>
+          <MaterialCommunityIcons name="crosshairs-gps" size={15} color={colors.brandDeep} />
+          <Text style={styles.locStatusText}>Using your current location</Text>
+        </View>
+      )}
+
+      {(locState === "prompt" || locState === "blocked") && savedCity && (
+        <View style={styles.locStatusRow}>
+          <MaterialCommunityIcons name="map-marker-outline" size={15} color={colors.faint} />
+          <Text style={styles.locStatusText}>Based on {savedCity}</Text>
+        </View>
+      )}
+
+      {/* Radius chips */}
+      <View style={styles.radiusRow}>
+        <Text style={styles.radiusLabel}>Within</Text>
+        {RADIUS_OPTIONS.map((r) => (
+          <Pressable
+            key={r}
+            testID={`nearby-radius-${r}`}
+            onPress={() => onSetRadius(r)}
+            style={[styles.radiusChip, radiusMi === r && styles.radiusChipActive]}
+          >
+            <Text style={[styles.radiusChipText, radiusMi === r && styles.radiusChipTextActive]}>{r} mi</Text>
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 }
@@ -155,4 +322,41 @@ const styles = StyleSheet.create({
   topTabText: { fontFamily: font.semibold, fontSize: 16, color: colors.faint },
   topTabTextActive: { color: colors.onSurface },
   topTabUnderline: { height: 2.5, width: 20, backgroundColor: colors.brandDeep, borderRadius: 2, marginTop: 6, position: "absolute", bottom: 2 },
+
+  // Nearby controls
+  nearbyWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
+  locCard: {
+    flexDirection: "row",
+    gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: rad.lg,
+    padding: spacing.md,
+  },
+  locCardBody: { flex: 1 },
+  locTitle: { fontFamily: font.semibold, fontSize: 15, color: colors.onSurface, marginBottom: 2 },
+  locSub: { fontFamily: font.regular, fontSize: 13, color: colors.faint, lineHeight: 18 },
+  locBtn: {
+    alignSelf: "flex-start",
+    marginTop: spacing.sm,
+    backgroundColor: colors.brand,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 9,
+    borderRadius: rad.pill,
+  },
+  locBtnText: { fontFamily: font.semibold, fontSize: 13, color: colors.onSurface },
+  locStatusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  locStatusText: { fontFamily: font.regular, fontSize: 12.5, color: colors.faint },
+  radiusRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, flexWrap: "wrap", marginTop: 2 },
+  radiusLabel: { fontFamily: font.semibold, fontSize: 13, color: colors.onSurface, marginRight: 2 },
+  radiusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderRadius: rad.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  radiusChipActive: { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse },
+  radiusChipText: { fontFamily: font.semibold, fontSize: 12.5, color: colors.faint },
+  radiusChipTextActive: { color: colors.onSurfaceInverse },
 });

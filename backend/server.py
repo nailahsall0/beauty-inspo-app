@@ -525,7 +525,9 @@ async def create_post(body: PostIn, user: dict = Depends(get_current_user)):
 
 @api.get("/posts/feed")
 async def feed(feed_type: str = "foryou", category_id: Optional[str] = None,
-               limit: int = 40, viewer: Optional[dict] = Depends(get_optional_user)):
+               lat: Optional[float] = None, lng: Optional[float] = None,
+               radius: int = 25, limit: int = 40,
+               viewer: Optional[dict] = Depends(get_optional_user)):
     q: Dict[str, Any] = {}
     if category_id:
         q["category_id"] = category_id
@@ -533,10 +535,65 @@ async def feed(feed_type: str = "foryou", category_id: Optional[str] = None,
         following = await db.follows.find({"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}).to_list(1000)
         ids = [f["following_id"] for f in following]
         q["author_id"] = {"$in": ids if ids else ["__none__"]}
+    if feed_type == "nearby":
+        return await _nearby_feed(q, lat, lng, radius, limit, viewer)
     posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
-    if feed_type == "nearby" and viewer and viewer.get("city"):
-        posts.sort(key=lambda p: 0 if (p.get("city") == viewer.get("city")) else 1)
     return await enrich_posts(posts, viewer)
+
+
+def _post_coords(p: dict, pros: dict) -> tuple:
+    """Best available coordinates for a post: its own, else its tagged pro's."""
+    plat, plng = p.get("lat"), p.get("lng")
+    if plat is None or plng is None:
+        pro = pros.get(p.get("tagged_professional_id"))
+        if pro:
+            plat, plng = pro.get("lat"), pro.get("lng")
+    return plat, plng
+
+
+async def _nearby_feed(q: Dict[str, Any], lat: Optional[float], lng: Optional[float],
+                       radius: int, limit: int, viewer: Optional[dict]) -> list:
+    # Determine the reference point: device coords > viewer's saved coords.
+    base_lat = lat if lat is not None else (viewer.get("lat") if viewer else None)
+    base_lng = lng if lng is not None else (viewer.get("lng") if viewer else None)
+    viewer_city = (viewer.get("city") if viewer else None) or None
+
+    # Pull a generous candidate set, then rank locally.
+    candidates = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(400)
+    if not candidates:
+        return []
+
+    pro_ids = [c["tagged_professional_id"] for c in candidates if c.get("tagged_professional_id")]
+    pros = {}
+    if pro_ids:
+        pros = {pr["id"]: pr for pr in await db.professional_profiles.find(
+            {"id": {"$in": list(set(pro_ids))}}, {"_id": 0}).to_list(len(set(pro_ids)))}
+
+    selected: list = []
+    dist_map: Dict[str, float] = {}
+    if base_lat is not None and base_lng is not None:
+        for p in candidates:
+            plat, plng = _post_coords(p, pros)
+            d = haversine(base_lat, base_lng, plat, plng)
+            if d is not None and d <= radius:
+                dist_map[p["id"]] = round(d, 1)
+                selected.append(p)
+        selected.sort(key=lambda p: dist_map[p["id"]])
+    elif viewer_city:
+        # No coordinates available (permission denied, no saved coords): match on saved city.
+        vc = viewer_city.strip().lower()
+        for p in candidates:
+            pc = (p.get("city") or "").strip().lower()
+            if pc and pc == vc:
+                selected.append(p)
+    else:
+        return []
+
+    selected = selected[:limit]
+    enriched = await enrich_posts(selected, viewer)
+    for p in enriched:
+        p["distance"] = dist_map.get(p["id"])
+    return enriched
 
 
 @api.get("/posts/{post_id}")

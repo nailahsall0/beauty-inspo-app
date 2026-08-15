@@ -41,6 +41,11 @@ Mobile-first beauty discovery platform connecting beauty inspiration with local 
 - P2: Reviews, native booking, messaging (architecture-ready), AI "Find this look".
 - P2: Split server.py into routers; richer professional post form.
 
+## Implemented — Iteration 4 (Nearby / location)
+- Nearby feed is now **distance-based**: `GET /posts/feed?feed_type=nearby&lat&lng&radius` uses haversine on the post's coords (falling back to its tagged pro's coords), filters to the radius, sorts ascending, and returns a `distance` (mi) per post.
+- Fallback (no device coords): backend uses the viewer's **saved profile coords/city** (city string match) — no free-text/autocomplete entry (per user choice).
+- Frontend Nearby tab: contextual `expo-location` permission (pre-permission "Use my location" card, "Open Settings" when blocked, graceful denial), **radius chips 10/25/50/100 mi** (default 25), "Based on {city}" status, and a "No pros nearby yet" empty state.
+
 ## Run
 - Backend auto-runs (supervisor `backend`), Expo on `expo`. Reseed: `cd /app/backend && python seed.py`.
 - Credentials in `/app/memory/test_credentials.md`.
