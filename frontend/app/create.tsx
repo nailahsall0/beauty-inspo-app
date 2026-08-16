@@ -50,12 +50,40 @@ export default function CreatePost() {
   const [taggedPro, setTaggedPro] = useState<any>(null);
   const [postAsPro, setPostAsPro] = useState(!!user?.is_professional);
   const [publishing, setPublishing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const STEPS = ["Media", "Caption", "Category", "Service", "Style", "Details", "Location", "Tag Pro", "Preview"];
 
   useEffect(() => {
     apiFetch<Cat[]>("/categories", { auth: false }).then(setCats).catch(() => {});
     apiFetch<Style[]>("/styles", { auth: false }).then(setStyles).catch(() => {});
+  }, []);
+
+  // Auto-detect location on mount if permission already granted
+  useEffect(() => {
+    const autoDetectLocation = async () => {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (perm.granted) {
+        setLocationLoading(true);
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          const geo = await Location.reverseGeocodeAsync({
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          });
+          if (geo[0]) {
+            setCity(geo[0].city || geo[0].subregion || "");
+            setState(geo[0].region || "");
+          }
+        } catch {
+          // Silent fail - keep profile fallback
+        } finally {
+          setLocationLoading(false);
+        }
+      }
+    };
+    autoDetectLocation();
   }, []);
 
   useEffect(() => {
@@ -358,7 +386,24 @@ export default function CreatePost() {
         {step === 6 && (
           <View>
             <Text style={styles.stepTitle}>Add location</Text>
-            <Btn label="Use Current Location" variant="outline" icon="crosshairs-gps" onPress={useCurrentLocation} style={{ marginVertical: spacing.md, height: 46 }} />
+            {locationLoading ? (
+              <View style={styles.locLoadingRow}>
+                <Loading />
+                <Text style={styles.locLoadingText}>Detecting your location...</Text>
+              </View>
+            ) : coords ? (
+              <View style={styles.locStatusRow}>
+                <MaterialCommunityIcons name="crosshairs-gps" size={15} color={colors.brandDeep} />
+                <Text style={styles.locStatusText}>Using your current location</Text>
+              </View>
+            ) : null}
+            <Btn
+              label={coords ? "Update Location" : "Use Current Location"}
+              variant="outline"
+              icon="crosshairs-gps"
+              onPress={useCurrentLocation}
+              style={{ marginVertical: spacing.md, height: 46 }}
+            />
             <Text style={styles.fieldLabel}>City</Text>
             <TextInput testID="create-city" value={city} onChangeText={setCity} placeholder="Cincinnati" placeholderTextColor={colors.faint} style={styles.smallInput} />
             <Text style={styles.fieldLabel}>State</Text>
@@ -465,4 +510,8 @@ const styles = StyleSheet.create({
   prevLabel: { fontFamily: font.semibold, fontSize: 12, color: colors.muted, letterSpacing: 0.4 },
   prevValue: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  locLoadingRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, marginBottom: spacing.sm },
+  locLoadingText: { fontFamily: font.medium, fontSize: 14, color: colors.muted },
+  locStatusRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  locStatusText: { fontFamily: font.medium, fontSize: 14, color: colors.brandDeep },
 });

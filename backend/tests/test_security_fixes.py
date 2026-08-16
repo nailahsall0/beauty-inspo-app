@@ -286,3 +286,114 @@ class TestPersonalizedFeed:
         # Response should be a list
         data = response.json()
         assert isinstance(data, list)
+
+
+class TestFuzzySearch:
+    """Tests for fuzzy search functionality."""
+
+    def test_fuzzy_match_function_exists(self):
+        """fuzzy_match function should be defined."""
+        try:
+            from server import fuzzy_match
+            assert callable(fuzzy_match)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_exact_substring(self):
+        """Exact substring should return match with score 1.0."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("braid", "braids")
+            assert match is True
+            assert score == 1.0
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_partial(self):
+        """Partial match should return True for similar strings."""
+        try:
+            from server import fuzzy_match
+            # "brid" is close to "braid" (one letter off)
+            match, score = fuzzy_match("brid", "braid")
+            assert match is True
+            assert score >= 0.6
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_no_match(self):
+        """Completely different strings should not match."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("xyz", "braids")
+            assert match is False
+            assert score < 0.6
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_multiword(self):
+        """Should match individual words in multi-word targets."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("knotless", "knotless braids")
+            assert match is True
+            assert score == 1.0
+        except ImportError:
+            pytest.skip("Server not available")
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_search_endpoint_returns_suggestions(self):
+        """Search endpoint should return suggestions array."""
+        response = client.get("/api/search?q=test")
+        assert response.status_code == 200
+        data = response.json()
+        assert "suggestions" in data
+        assert isinstance(data["suggestions"], list)
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_search_endpoint_returns_posts(self):
+        """Search endpoint should return posts array."""
+        response = client.get("/api/search?q=test")
+        assert response.status_code == 200
+        data = response.json()
+        assert "posts" in data
+        assert isinstance(data["posts"], list)
+
+
+class TestPublicUserLocation:
+    """Tests for public_user returning lat/lng."""
+
+    def test_public_user_includes_lat_lng(self):
+        """public_user should include lat and lng fields."""
+        try:
+            from server import public_user
+            user = {
+                "id": "test123",
+                "username": "testuser",
+                "display_name": "Test User",
+                "lat": 39.1031,
+                "lng": -84.5120,
+            }
+            result = public_user(user)
+            assert "lat" in result
+            assert "lng" in result
+            assert result["lat"] == 39.1031
+            assert result["lng"] == -84.5120
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_public_user_handles_missing_lat_lng(self):
+        """public_user should handle missing lat/lng gracefully."""
+        try:
+            from server import public_user
+            user = {
+                "id": "test123",
+                "username": "testuser",
+                "display_name": "Test User",
+            }
+            result = public_user(user)
+            assert "lat" in result
+            assert "lng" in result
+            assert result["lat"] is None
+            assert result["lng"] is None
+        except ImportError:
+            pytest.skip("Server not available")

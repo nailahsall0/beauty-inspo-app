@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable, TextInput } from "react-native";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -23,7 +24,11 @@ export default function EditProfile() {
   const [state, setState] = useState(user?.state || "");
   const [avatar, setAvatar] = useState(user?.avatar_url || "");
   const [isPublic, setIsPublic] = useState(!!user?.profile_public);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    user?.lat && user?.lng ? { lat: user.lat, lng: user.lng } : null
+  );
   const [saving, setSaving] = useState(false);
+  const [locLoading, setLocLoading] = useState(false);
 
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -37,10 +42,49 @@ export default function EditProfile() {
     } catch { toast.show("Upload failed", "error"); }
   };
 
+  const useCurrentLocation = async () => {
+    setLocLoading(true);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== "granted") {
+        toast.show("Location permission denied", "error");
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      const geo = await Location.reverseGeocodeAsync({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      });
+      if (geo[0]) {
+        setCity(geo[0].city || geo[0].subregion || "");
+        setState(geo[0].region || "");
+      }
+      toast.show("Location set", "success");
+    } catch {
+      toast.show("Could not get location", "error");
+    } finally {
+      setLocLoading(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
-      await apiFetch("/users/me", { method: "PUT", body: { display_name: name.trim(), username: username.trim(), bio, city, state, avatar_url: avatar, profile_public: isPublic } });
+      await apiFetch("/users/me", {
+        method: "PUT",
+        body: {
+          display_name: name.trim(),
+          username: username.trim(),
+          bio,
+          city,
+          state,
+          avatar_url: avatar,
+          profile_public: isPublic,
+          lat: coords?.lat ?? null,
+          lng: coords?.lng ?? null,
+        },
+      });
       await refresh();
       toast.show("Profile saved", "success");
       router.back();
@@ -65,6 +109,26 @@ export default function EditProfile() {
         <F label="Display name" value={name} onChange={setName} testID="edit-name" />
         <F label="Username" value={username} onChange={setUsername} autoCap="none" testID="edit-username" />
         <F label="Bio" value={bio} onChange={setBio} multiline testID="edit-bio" />
+
+        <View style={styles.locSection}>
+          <Text style={styles.label}>Location</Text>
+          <Btn
+            testID="edit-use-location"
+            label={coords ? "Update Location" : "Use My Location"}
+            variant="outline"
+            icon="crosshairs-gps"
+            onPress={useCurrentLocation}
+            loading={locLoading}
+            style={{ marginBottom: spacing.md }}
+          />
+          {coords && (
+            <View style={styles.locStatus}>
+              <MaterialCommunityIcons name="check-circle" size={14} color={colors.brandDeep} />
+              <Text style={styles.locStatusText}>Location saved</Text>
+            </View>
+          )}
+        </View>
+
         <View style={{ flexDirection: "row", gap: spacing.md }}>
           <View style={{ flex: 1 }}><F label="City" value={city} onChange={setCity} testID="edit-city" /></View>
           <View style={{ width: 90 }}><F label="State" value={state} onChange={setState} testID="edit-state" /></View>
@@ -108,4 +172,7 @@ const styles = StyleSheet.create({
   privacySub: { fontFamily: font.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 50, fontFamily: font.medium, fontSize: 15, color: colors.onSurface, borderWidth: 1, borderColor: colors.border },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  locSection: { marginBottom: spacing.md },
+  locStatus: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: spacing.sm },
+  locStatusText: { fontFamily: font.medium, fontSize: 13, color: colors.brandDeep },
 });

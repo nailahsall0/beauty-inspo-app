@@ -181,7 +181,8 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 def public_user(u: dict) -> dict:
     return {"id": u["id"], "username": u.get("username"), "display_name": u.get("display_name"),
             "avatar_url": u.get("avatar_url"), "bio": u.get("bio"), "city": u.get("city"),
-            "state": u.get("state"), "role": u.get("role"), "is_professional": u.get("is_professional", False),
+            "state": u.get("state"), "lat": u.get("lat"), "lng": u.get("lng"),
+            "role": u.get("role"), "is_professional": u.get("is_professional", False),
             "interests": u.get("interests", []), "profile_public": u.get("profile_public", False)}
 
 
@@ -194,6 +195,35 @@ def haversine(lat1, lon1, lat2, lon2):
     dl = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+from difflib import SequenceMatcher
+
+def fuzzy_match(query: str, target: str, threshold: float = 0.6) -> tuple:
+    """
+    Returns (is_match, score) where score is 0-1 similarity ratio.
+    A score >= threshold is considered a match.
+    """
+    query = query.lower().strip()
+    target = target.lower().strip()
+
+    # Exact substring match gets highest score
+    if query in target:
+        return True, 1.0
+
+    # Word-level fuzzy matching
+    target_words = target.split()
+    best_score = 0.0
+    for word in target_words:
+        ratio = SequenceMatcher(None, query, word).ratio()
+        if ratio > best_score:
+            best_score = ratio
+
+    # Also check whole string similarity for multi-word queries
+    full_ratio = SequenceMatcher(None, query, target).ratio()
+    best_score = max(best_score, full_ratio)
+
+    return best_score >= threshold, best_score
 
 
 async def log_event(event_type: str, actor_id: Optional[str] = None, professional_id: Optional[str] = None,
@@ -1398,19 +1428,40 @@ async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
     await log_event("SEARCH", viewer["id"] if viewer else None, metadata={"q": q})
     ql = q.lower()
     rx = _re_escape(q)  # Use existing helper function for consistent escaping
+
     services = await db.services.find({"active": True}, {"_id": 0}).to_list(500)
     styles = await db.styles.find({"active": True}, {"_id": 0}).to_list(500)
     categories = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
-    suggestions = [s["name"] for s in services if ql in s["name"].lower()][:5] + \
-                  [s["name"] for s in styles if ql in s["name"].lower()][:5] + \
-                  [c["name"] for c in categories if ql in c["name"].lower()][:3]
-    # category ids whose name matches the query
-    cat_ids = [c["id"] for c in categories if ql in c["name"].lower()]
-    # author ids whose username/display name matches
+
+    # Fuzzy match services, styles, categories with scores
+    def score_items(items, key="name"):
+        scored = []
+        for item in items:
+            match, score = fuzzy_match(ql, item.get(key, ""))
+            if match:
+                scored.append((item, score))
+        return sorted(scored, key=lambda x: -x[1])
+
+    scored_services = score_items(services)
+    scored_styles = score_items(styles)
+    scored_categories = score_items(categories)
+
+    # Build suggestions from top fuzzy matches
+    suggestions = (
+        [s[0]["name"] for s in scored_services[:5]] +
+        [s[0]["name"] for s in scored_styles[:5]] +
+        [c[0]["name"] for c in scored_categories[:3]]
+    )
+
+    # Category IDs for post filtering (only high-confidence fuzzy matches)
+    cat_ids = [c[0]["id"] for c in scored_categories if c[1] >= 0.7]
+
+    # Author IDs whose username/display name matches
     matched_users = await db.users.find(
         {"$or": [{"username": {"$regex": rx, "$options": "i"}}, {"display_name": {"$regex": rx, "$options": "i"}}]},
         {"_id": 0, "id": 1}).to_list(50)
     author_ids = [u["id"] for u in matched_users]
+
     or_clauses = [
         {"caption": {"$regex": rx, "$options": "i"}},
         {"service_name": {"$regex": rx, "$options": "i"}},
@@ -1422,9 +1473,46 @@ async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
         or_clauses.append({"category_id": {"$in": cat_ids}})
     if author_ids:
         or_clauses.append({"author_id": {"$in": author_ids}})
-    posts = await db.posts.find({"$or": or_clauses}, {"_id": 0}).sort("created_at", -1).to_list(40)
+
+    # Fetch more candidates for relevance scoring
+    posts = await db.posts.find({"$or": or_clauses}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+    # Score and sort posts by relevance
+    def score_search_post(post):
+        score = 0.0
+        service = (post.get("service_name") or "").lower()
+        style = (post.get("style_name") or "").lower()
+        styles = " ".join(post.get("style_names") or []).lower()
+        caption = (post.get("caption") or "").lower()
+
+        # Direct matches in key fields score highest
+        if ql in service:
+            score += 3.0
+        elif fuzzy_match(ql, service, 0.7)[0]:
+            score += 2.0
+
+        if ql in style or ql in styles:
+            score += 2.5
+        elif fuzzy_match(ql, style, 0.7)[0] or fuzzy_match(ql, styles, 0.7)[0]:
+            score += 1.5
+
+        if ql in caption:
+            score += 1.0
+
+        # Engagement boost
+        engagement = post.get("like_count", 0) + post.get("save_count", 0) * 2
+        if engagement > 0:
+            score += min(0.5, math.log10(engagement + 1) * 0.2)
+
+        return score
+
+    scored_posts = [(p, score_search_post(p)) for p in posts]
+    scored_posts.sort(key=lambda x: -x[1])
+    posts = [p[0] for p in scored_posts[:40]]
+
     pros = await search_professionals(q=q, viewer=viewer)
-    matched_services = [s for s in services if ql in s["name"].lower()][:10]
+    matched_services = [s[0] for s in scored_services[:10]]
+
     return {
         "suggestions": list(dict.fromkeys(suggestions))[:8],
         "posts": await enrich_posts(posts, viewer),
