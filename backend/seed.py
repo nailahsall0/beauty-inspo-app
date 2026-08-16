@@ -1,16 +1,27 @@
 import asyncio
 import os
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 import bcrypt
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("seed")
+
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
+
+# Get test account password from environment (required for seeding test accounts)
+# This prevents hardcoded credentials in version control
+SEED_TEST_PASSWORD = os.environ.get("SEED_TEST_PASSWORD")
+if not SEED_TEST_PASSWORD:
+    logger.warning("SEED_TEST_PASSWORD not set. Test accounts will not be created.")
+    logger.warning("Set SEED_TEST_PASSWORD environment variable to create test accounts.")
 
 
 def nid():
@@ -101,14 +112,18 @@ async def run():
                                "lat": None, "lng": None, "is_professional": False, "professional_id": None,
                                "disabled": False, "created_at": iso(30)})
 
-    # demo customer
-    cust_id = nid()
-    await db.users.insert_one({"id": cust_id, "email": "maya@brook.ie", "password_hash": h("Password123"),
-                               "role": "customer", "username": "maya", "display_name": "Maya Rivera",
-                               "bio": "Beauty lover exploring new looks ✨", "city": "Cincinnati", "state": "OH",
-                               "avatar_url": IMG["avatar4"], "interests": ["Hair", "Nails", "Lashes"],
-                               "lat": 39.1031, "lng": -84.5120, "is_professional": False, "professional_id": None,
-                               "disabled": False, "created_at": iso(10)})
+    # demo customer (only created if SEED_TEST_PASSWORD is set)
+    cust_id = None
+    if SEED_TEST_PASSWORD:
+        cust_id = nid()
+        await db.users.insert_one({"id": cust_id, "email": "maya@brook.ie", "password_hash": h(SEED_TEST_PASSWORD),
+                                   "role": "customer", "username": "maya", "display_name": "Maya Rivera",
+                                   "bio": "Beauty lover exploring new looks ✨", "city": "Cincinnati", "state": "OH",
+                                   "avatar_url": IMG["avatar4"], "interests": ["Hair", "Nails", "Lashes"],
+                                   "lat": 39.1031, "lng": -84.5120, "is_professional": False, "professional_id": None,
+                                   "disabled": False, "created_at": iso(10)})
+    else:
+        logger.info("Skipping demo customer account (SEED_TEST_PASSWORD not set)")
 
     # professionals: (user fields, pro fields, services list, city coords)
     pros_data = [
@@ -160,10 +175,16 @@ async def run():
 
     pro_ids = []
     pro_user_ids = []
+
+    # Only create professional accounts if SEED_TEST_PASSWORD is set
+    if not SEED_TEST_PASSWORD:
+        logger.info("Skipping professional accounts (SEED_TEST_PASSWORD not set)")
+        pros_data = []  # Skip all professionals
+
     for pd in pros_data:
         uid = nid()
         pid = nid()
-        await db.users.insert_one({"id": uid, "email": pd["email"], "password_hash": h("Password123"),
+        await db.users.insert_one({"id": uid, "email": pd["email"], "password_hash": h(SEED_TEST_PASSWORD),
                                    "role": "customer", "username": pd["username"], "display_name": pd["display"],
                                    "bio": pd["bio"], "city": pd["city"], "state": pd["state"],
                                    "avatar_url": pd["avatar"], "interests": pd["cat"],
@@ -193,50 +214,56 @@ async def run():
                 "like_count": 40 + j * 12, "comment_count": 3 + j, "save_count": 15 + j * 5,
                 "view_count": 200 + j * 50, "created_at": iso(j, 3)})
 
-    # customer post tagging braidsbykay
-    cust_post_id = nid()
-    await db.posts.insert_one({
-        "id": cust_post_id, "author_id": cust_id, "post_type": "customer",
-        "media": [{"url": IMG["hair1"], "type": "image", "width": 800, "height": 1000}],
-        "caption": "Birthday hair ❤️", "category_id": cat_ids["Hair"],
-        "service_id": svc_ids.get("Boho Knotless"), "service_name": "Boho Knotless",
-        "style_id": None, "style_name": "Boho",
-        "attributes": {"Length": "Waist", "Size": "Medium"}, "city": "Cincinnati", "state": "OH",
-        "lat": 39.1031, "lng": -84.5120, "tagged_professional_id": pro_ids[0], "tag_status": "confirmed",
-        "professional_details": "Medium boho knotless · Waist length · 3 packs X-Pression · Human hair pieces · Approximately 6 hours",
-        "professional_details_by": pro_ids[0],
-        "like_count": 88, "comment_count": 5, "save_count": 30, "view_count": 340, "created_at": iso(1)})
+    # customer post tagging braidsbykay (only if customer and professionals were created)
+    cust_post_id = None
+    if cust_id and pro_ids:
+        cust_post_id = nid()
+        await db.posts.insert_one({
+            "id": cust_post_id, "author_id": cust_id, "post_type": "customer",
+            "media": [{"url": IMG["hair1"], "type": "image", "width": 800, "height": 1000}],
+            "caption": "Birthday hair", "category_id": cat_ids["Hair"],
+            "service_id": svc_ids.get("Boho Knotless"), "service_name": "Boho Knotless",
+            "style_id": None, "style_name": "Boho",
+            "attributes": {"Length": "Waist", "Size": "Medium"}, "city": "Cincinnati", "state": "OH",
+            "lat": 39.1031, "lng": -84.5120, "tagged_professional_id": pro_ids[0], "tag_status": "confirmed",
+            "professional_details": "Medium boho knotless. Waist length. 3 packs X-Pression. Human hair pieces. Approximately 6 hours",
+            "professional_details_by": pro_ids[0],
+            "like_count": 88, "comment_count": 5, "save_count": 30, "view_count": 340, "created_at": iso(1)})
 
-    # a makeup + skincare post from customer
-    await db.posts.insert_one({
-        "id": nid(), "author_id": cust_id, "post_type": "customer",
-        "media": [{"url": IMG["makeup1"], "type": "image", "width": 800, "height": 1000}],
-        "caption": "Soft glam for date night 💄", "category_id": cat_ids["Makeup"],
-        "service_id": svc_ids.get("Soft Glam"), "service_name": "Soft Glam", "style_id": None, "style_name": "Soft Glam",
-        "attributes": {"Finish": "Dewy"}, "city": "Cincinnati", "state": "OH", "lat": 39.1031, "lng": -84.5120,
-        "tagged_professional_id": None, "tag_status": None,
-        "professional_details": None, "professional_details_by": None,
-        "like_count": 54, "comment_count": 2, "save_count": 20, "view_count": 180, "created_at": iso(2)})
+        # a makeup + skincare post from customer
+        await db.posts.insert_one({
+            "id": nid(), "author_id": cust_id, "post_type": "customer",
+            "media": [{"url": IMG["makeup1"], "type": "image", "width": 800, "height": 1000}],
+            "caption": "Soft glam for date night", "category_id": cat_ids["Makeup"],
+            "service_id": svc_ids.get("Soft Glam"), "service_name": "Soft Glam", "style_id": None, "style_name": "Soft Glam",
+            "attributes": {"Finish": "Dewy"}, "city": "Cincinnati", "state": "OH", "lat": 39.1031, "lng": -84.5120,
+            "tagged_professional_id": None, "tag_status": None,
+            "professional_details": None, "professional_details_by": None,
+            "like_count": 54, "comment_count": 2, "save_count": 20, "view_count": 180, "created_at": iso(2)})
 
-    # follows, likes, collection for demo customer
-    await db.follows.insert_one({"id": nid(), "follower_id": cust_id, "following_id": pro_user_ids[0], "created_at": iso(3)})
-    await db.likes.insert_one({"id": nid(), "post_id": cust_post_id, "user_id": pro_user_ids[0], "created_at": iso(0)})
-    col_id = nid()
-    await db.collections.insert_one({"id": col_id, "user_id": cust_id, "name": "Birthday Hair",
-                                     "cover_url": IMG["hair1"], "post_count": 1, "created_at": iso(3)})
-    await db.saves.insert_one({"id": nid(), "post_id": cust_post_id, "user_id": cust_id,
-                               "collection_id": col_id, "created_at": iso(1)})
-    await db.posts.update_one({"id": cust_post_id}, {"$inc": {"save_count": 1}})
+        # follows, likes, collection for demo customer
+        await db.follows.insert_one({"id": nid(), "follower_id": cust_id, "following_id": pro_user_ids[0], "created_at": iso(3)})
+        await db.likes.insert_one({"id": nid(), "post_id": cust_post_id, "user_id": pro_user_ids[0], "created_at": iso(0)})
+        col_id = nid()
+        await db.collections.insert_one({"id": col_id, "user_id": cust_id, "name": "Birthday Hair",
+                                         "cover_url": IMG["hair1"], "post_count": 1, "created_at": iso(3)})
+        await db.saves.insert_one({"id": nid(), "post_id": cust_post_id, "user_id": cust_id,
+                                   "collection_id": col_id, "created_at": iso(1)})
+        await db.posts.update_one({"id": cust_post_id}, {"$inc": {"save_count": 1}})
 
-    # a pending tag notification for a pro
-    await db.notifications.insert_one({"id": nid(), "user_id": pro_user_ids[1], "type": "tag_request",
-                                       "actor_id": cust_id, "post_id": cust_post_id,
-                                       "text": "Maya Rivera tagged you in a post", "read": False, "created_at": iso(0)})
+        # a pending tag notification for a pro
+        if len(pro_user_ids) > 1:
+            await db.notifications.insert_one({"id": nid(), "user_id": pro_user_ids[1], "type": "tag_request",
+                                               "actor_id": cust_id, "post_id": cust_post_id,
+                                               "text": "Maya Rivera tagged you in a post", "read": False, "created_at": iso(0)})
 
     print("Seed complete.")
-    print(f"  Admin:    {os.environ['ADMIN_EMAIL']} / {os.environ['ADMIN_PASSWORD']}")
-    print("  Customer: maya@brook.ie / Password123")
-    print("  Pro:      kay@brook.ie / Password123 (braidsbykay, verified)")
+    print(f"  Admin:    {os.environ['ADMIN_EMAIL']} / (password from ADMIN_PASSWORD env var)")
+    if SEED_TEST_PASSWORD:
+        print("  Customer: maya@brook.ie / (password from SEED_TEST_PASSWORD env var)")
+        print("  Pro:      kay@brook.ie / (password from SEED_TEST_PASSWORD env var) (braidsbykay, verified)")
+    else:
+        print("  NOTE: Test accounts not created. Set SEED_TEST_PASSWORD env var to create them.")
     print(f"  Categories: {await db.categories.count_documents({})}, Services: {await db.services.count_documents({})}, Posts: {await db.posts.count_documents({})}")
     client.close()
 
