@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -223,6 +224,11 @@ export default function CreatePost() {
               {media.map((m, i) => (
                 <View key={i} style={styles.mediaThumb}>
                   <Image source={{ uri: mediaUrl(m.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                  {m.type === "video" && (
+                    <View style={styles.videoIndicator}>
+                      <MaterialCommunityIcons name="play-circle" size={28} color={colors.white} />
+                    </View>
+                  )}
                   <Pressable testID={`remove-media-${i}`} onPress={() => setMedia((arr) => arr.filter((_, x) => x !== i))} style={styles.removeMedia}>
                     <MaterialCommunityIcons name="close" size={14} color={colors.white} />
                   </Pressable>
@@ -440,7 +446,15 @@ export default function CreatePost() {
         {step === 8 && (
           <View>
             <Text style={styles.stepTitle}>Preview</Text>
-            {media[0] && <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />}
+            {media[0] && (
+              media[0].type === "video" ? (
+                <View style={styles.previewImg}>
+                  <PreviewVideo uri={mediaUrl(media[0].url)!} />
+                </View>
+              ) : (
+                <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />
+              )
+            )}
             {caption ? <Text style={[styles.caption]}>{caption}</Text> : null}
             <View style={styles.previewMeta}>
               <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} />
@@ -474,6 +488,15 @@ function PreviewRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function PreviewVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
+}
+
 const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   headerTitle: { fontFamily: font.bold, fontSize: 17, color: colors.onSurface },
@@ -486,6 +509,7 @@ const styles = StyleSheet.create({
   hintText: { flex: 1, fontFamily: font.medium, fontSize: 12.5, lineHeight: 18, color: colors.brandDeep },
   mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, marginTop: spacing.lg },
   mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary },
+  videoIndicator: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
   removeMedia: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
   addMedia: { width: 100, height: 130, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.borderStrong, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
   addMediaText: { fontFamily: font.semibold, fontSize: 12, color: colors.brandDeep },
@@ -503,7 +527,7 @@ const styles = StyleSheet.create({
   proResult: { padding: spacing.md, backgroundColor: colors.white, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
   proResultName: { fontFamily: font.bold, fontSize: 14, color: colors.onSurface },
   proResultHandle: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
-  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, marginTop: spacing.lg },
+  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, marginTop: spacing.lg, overflow: "hidden" },
   caption: { fontFamily: font.regular, fontSize: 15, color: colors.onSurface, marginTop: spacing.md },
   previewMeta: { marginTop: spacing.lg, gap: spacing.sm },
   prevRow: { flexDirection: "row", justifyContent: "space-between" },
