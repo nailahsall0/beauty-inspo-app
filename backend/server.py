@@ -12,6 +12,7 @@ import os
 import logging
 import uuid
 import math
+import asyncio
 import requests
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -257,6 +258,157 @@ async def enrich_posts(posts: list, viewer: Optional[dict]) -> list:
         p["liked"] = p["id"] in liked_ids
         p["saved"] = p["id"] in saved_ids
     return posts
+
+
+# ------------------------- Personalization -------------------------
+async def get_user_preferences(user_id: str) -> dict:
+    """Aggregate user's implicit preferences from engagement history."""
+    # Get saved and liked post IDs in parallel
+    saves_task = db.saves.find({"user_id": user_id}, {"_id": 0, "post_id": 1}).to_list(500)
+    likes_task = db.likes.find({"user_id": user_id}, {"_id": 0, "post_id": 1}).to_list(500)
+    saves, likes = await asyncio.gather(saves_task, likes_task)
+
+    saved_post_ids = [s["post_id"] for s in saves]
+    liked_post_ids = [l["post_id"] for l in likes]
+
+    # Batch fetch saved/liked posts for their categories and styles
+    all_post_ids = list(set(saved_post_ids + liked_post_ids))
+    if not all_post_ids:
+        return {"saved_categories": set(), "liked_categories": set(),
+                "saved_styles": set(), "liked_styles": set()}
+
+    posts = await db.posts.find(
+        {"id": {"$in": all_post_ids}},
+        {"_id": 0, "id": 1, "category_id": 1, "style_names": 1}
+    ).to_list(len(all_post_ids))
+    post_map = {p["id"]: p for p in posts}
+
+    saved_categories = set()
+    saved_styles = set()
+    liked_categories = set()
+    liked_styles = set()
+
+    for pid in saved_post_ids:
+        p = post_map.get(pid, {})
+        if p.get("category_id"):
+            saved_categories.add(p["category_id"])
+        for s in p.get("style_names", []):
+            saved_styles.add(s.lower())
+
+    for pid in liked_post_ids:
+        p = post_map.get(pid, {})
+        if p.get("category_id"):
+            liked_categories.add(p["category_id"])
+        for s in p.get("style_names", []):
+            liked_styles.add(s.lower())
+
+    return {
+        "saved_categories": saved_categories,
+        "liked_categories": liked_categories,
+        "saved_styles": saved_styles,
+        "liked_styles": liked_styles
+    }
+
+
+def score_post(post: dict, user: dict, user_prefs: dict, following_ids: set) -> float:
+    """Calculate personalization score for a post (0-100)."""
+    interests = [i.lower() for i in user.get("interests", [])]
+
+    # 1. Interest Score (30% weight)
+    interest_score = 0
+    post_category = post.get("category_id") or ""
+    post_styles = [s.lower() for s in post.get("style_names", [])]
+    post_service = (post.get("service_name") or "").lower()
+
+    # Check if category matches any interest (categories are UUIDs, but interests might be names)
+    if post_category and post_category.lower() in interests:
+        interest_score += 50
+    # Style match
+    for style in post_styles:
+        if style in interests:
+            interest_score += 30
+            break
+    # Service name contains interest keyword
+    for interest in interests:
+        if interest in post_service:
+            interest_score += 20
+            break
+    interest_score = min(100, interest_score)
+
+    # 2. Engagement Score (25% weight) - based on user's save/like history
+    engagement_score = 0
+    if post_category in user_prefs.get("saved_categories", set()):
+        engagement_score += 50
+    elif post_category in user_prefs.get("liked_categories", set()):
+        engagement_score += 40
+    for style in post_styles:
+        if style in user_prefs.get("saved_styles", set()):
+            engagement_score += 30
+            break
+    engagement_score = min(100, engagement_score)
+
+    # 3. Social Score (20% weight) - posts from followed users
+    social_score = 100 if post["author_id"] in following_ids else 0
+
+    # 4. Quality Score (15% weight) - post engagement metrics
+    likes = post.get("like_count", 0)
+    saves = post.get("save_count", 0)
+    engagement = likes + (saves * 3)  # Saves worth 3x likes
+    quality_score = min(100, 25 * math.log10(engagement + 1)) if engagement > 0 else 0
+
+    # 5. Recency Score (10% weight) - 7-day half-life decay
+    try:
+        created_str = post.get("created_at", "")
+        if created_str:
+            created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+            recency_score = 100 * (0.5 ** (age_hours / 168))  # 7-day half-life
+        else:
+            recency_score = 50
+    except Exception:
+        recency_score = 50  # Default for parsing errors
+
+    # Weighted total
+    total = (
+        interest_score * 0.30 +
+        engagement_score * 0.25 +
+        social_score * 0.20 +
+        quality_score * 0.15 +
+        recency_score * 0.10
+    )
+
+    return total
+
+
+async def _personalized_feed(q: dict, limit: int, viewer: dict) -> list:
+    """Generate personalized feed for authenticated user with interests."""
+    # Fetch candidate pool (3x limit for scoring diversity)
+    candidate_limit = min(limit * 3, 120)
+    candidates = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(candidate_limit)
+
+    if not candidates:
+        return []
+
+    # Get user preferences and following list in parallel
+    user_prefs, following_docs = await asyncio.gather(
+        get_user_preferences(viewer["id"]),
+        db.follows.find(
+            {"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}
+        ).to_list(1000)
+    )
+    following_ids = {f["following_id"] for f in following_docs}
+
+    # Score all candidates
+    scored = []
+    for post in candidates:
+        score = score_post(post, viewer, user_prefs, following_ids)
+        scored.append((score, post))
+
+    # Sort by score descending, take top N
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_posts = [p for _, p in scored[:limit]]
+
+    return await enrich_posts(top_posts, viewer)
 
 
 # ------------------------- Models -------------------------
@@ -574,12 +726,22 @@ async def feed(feed_type: str = "foryou", category_id: Optional[str] = None,
     q: Dict[str, Any] = {}
     if category_id:
         q["category_id"] = category_id
+
     if feed_type == "following" and viewer:
         following = await db.follows.find({"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}).to_list(1000)
         ids = [f["following_id"] for f in following]
         q["author_id"] = {"$in": ids if ids else ["__none__"]}
+        posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+        return await enrich_posts(posts, viewer)
+
     if feed_type == "nearby":
         return await _nearby_feed(q, lat, lng, radius, limit, viewer)
+
+    # "foryou" feed - personalized for authenticated users with interests
+    if feed_type == "foryou" and viewer and viewer.get("interests"):
+        return await _personalized_feed(q, limit, viewer)
+
+    # Fallback: chronological for anonymous users or users without interests
     posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
     return await enrich_posts(posts, viewer)
 
@@ -1525,6 +1687,9 @@ async def startup():
     await db.users.create_index("username")
     await db.posts.create_index([("created_at", -1)])
     await db.posts.create_index("author_id")
+    # Indexes for personalized feed preference aggregation
+    await db.saves.create_index("user_id")
+    await db.likes.create_index("user_id")
     try:
         await run_in_threadpool(init_storage)
         logger.info("storage initialized")

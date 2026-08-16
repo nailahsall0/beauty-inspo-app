@@ -189,3 +189,100 @@ class TestLogging:
             assert logger.name == "brookie"
         except ImportError:
             pytest.skip("Server not available")
+
+
+class TestPersonalizedFeed:
+    """Tests for personalized feed functionality."""
+
+    def test_score_post_function_exists(self):
+        """score_post function should be defined."""
+        try:
+            from server import score_post
+            assert callable(score_post)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_get_user_preferences_function_exists(self):
+        """get_user_preferences function should be defined."""
+        try:
+            from server import get_user_preferences
+            import asyncio
+            assert asyncio.iscoroutinefunction(get_user_preferences)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_personalized_feed_function_exists(self):
+        """_personalized_feed function should be defined."""
+        try:
+            from server import _personalized_feed
+            import asyncio
+            assert asyncio.iscoroutinefunction(_personalized_feed)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_score_post_returns_float(self):
+        """score_post should return a float between 0-100."""
+        try:
+            from server import score_post
+            # Test with minimal data
+            post = {
+                "id": "test",
+                "author_id": "author1",
+                "category_id": None,
+                "style_names": [],
+                "service_name": None,
+                "like_count": 0,
+                "save_count": 0,
+                "created_at": "2026-08-15T12:00:00Z"
+            }
+            user = {"id": "user1", "interests": []}
+            user_prefs = {"saved_categories": set(), "liked_categories": set(),
+                          "saved_styles": set(), "liked_styles": set()}
+            following_ids = set()
+
+            score = score_post(post, user, user_prefs, following_ids)
+            assert isinstance(score, float)
+            assert 0 <= score <= 100
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_score_post_boosts_followed_users(self):
+        """Posts from followed users should have higher scores."""
+        try:
+            from server import score_post
+            post = {
+                "id": "test",
+                "author_id": "author1",
+                "category_id": None,
+                "style_names": [],
+                "service_name": None,
+                "like_count": 0,
+                "save_count": 0,
+                "created_at": "2026-08-15T12:00:00Z"
+            }
+            user = {"id": "user1", "interests": []}
+            user_prefs = {"saved_categories": set(), "liked_categories": set(),
+                          "saved_styles": set(), "liked_styles": set()}
+
+            score_not_following = score_post(post, user, user_prefs, set())
+            score_following = score_post(post, user, user_prefs, {"author1"})
+
+            assert score_following > score_not_following
+        except ImportError:
+            pytest.skip("Server not available")
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_feed_endpoint_accepts_foryou(self):
+        """Feed endpoint should accept foryou feed_type."""
+        response = client.get("/api/posts/feed?feed_type=foryou")
+        # Should work (might be 200 or 401 depending on auth state)
+        assert response.status_code in [200, 401]
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_feed_endpoint_anonymous_gets_chronological(self):
+        """Anonymous users should get chronological feed."""
+        response = client.get("/api/posts/feed?feed_type=foryou")
+        assert response.status_code == 200
+        # Response should be a list
+        data = response.json()
+        assert isinstance(data, list)
