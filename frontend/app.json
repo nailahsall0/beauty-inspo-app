@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.beautydiscover.ragxha",
+      "bundleIdentifier": "com.brookie.app",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Share beauty looks from your photo library",
         "NSCameraUsageDescription": "Capture beauty looks to post",
@@ -23,7 +23,7 @@
         "backgroundColor": "#FDFBF7"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.beautydiscover.ragxha",
+      "package": "com.brookie.app",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"

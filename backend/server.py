@@ -44,52 +44,77 @@ ACCESS_TOKEN_MINUTES = int(os.environ.get('ACCESS_TOKEN_MINUTES', '1440'))
 MAX_UPLOAD_SIZE = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '50')) * 1024 * 1024
 MAX_QUERY_LENGTH = 100  # Prevent overly complex regex patterns
 
-# ------------------------- Object Storage -------------------------
-STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
-STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+# ------------------------- Object Storage (S3-Compatible) -------------------------
+# Works with AWS S3, Cloudflare R2, Backblaze B2, or MinIO
+import boto3
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import ClientError
+
 APP_NAME = "brookie"
-_storage_key = None
+
+# S3 configuration from environment variables
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT")  # e.g., https://xxx.r2.cloudflarestorage.com
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY")
+S3_BUCKET = os.environ.get("S3_BUCKET", "brookie")
+
+# Initialize S3 client (lazy - only when needed)
+_s3_client = None
+
+
+def _get_s3():
+    """Get or create S3 client."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            's3',
+            endpoint_url=S3_ENDPOINT,
+            aws_access_key_id=S3_ACCESS_KEY,
+            aws_secret_access_key=S3_SECRET_KEY,
+            config=BotoConfig(signature_version='s3v4')
+        )
+    return _s3_client
 
 
 def init_storage():
-    global _storage_key
-    if _storage_key:
-        return _storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    _storage_key = resp.json()["storage_key"]
-    return _storage_key
+    """Initialize storage - for S3 this just validates the connection."""
+    try:
+        _get_s3().head_bucket(Bucket=S3_BUCKET)
+        logger.info(f"S3 storage connected to bucket: {S3_BUCKET}")
+    except ClientError as e:
+        logger.warning(f"S3 bucket check failed (may auto-create on first upload): {e}")
 
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    resp = requests.put(f"{STORAGE_URL}/objects/{path}",
-                        headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    """Upload an object to S3-compatible storage."""
+    s3 = _get_s3()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=path,
+        Body=data,
+        ContentType=content_type
+    )
+    return {"path": path, "bucket": S3_BUCKET}
 
 
 def get_object(path: str, max_retries: int = 2):
-    """Fetch object from storage with exponential backoff on 503 errors."""
-    global _storage_key
+    """Fetch object from S3-compatible storage with retries."""
     import time
+    s3 = _get_s3()
     last_error = None
+
     for attempt in range(max_retries + 1):
         try:
-            key = init_storage()
-            resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
-            if resp.status_code == 503 and attempt < max_retries:
-                resp.close()  # Clean up response object
-                _storage_key = None
-                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-                continue
-            resp.raise_for_status()
-            return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
-        except requests.exceptions.RequestException as e:
+            response = s3.get_object(Bucket=S3_BUCKET, Key=path)
+            content = response['Body'].read()
+            content_type = response.get('ContentType', 'application/octet-stream')
+            return content, content_type
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == 'NoSuchKey':
+                raise HTTPException(404, "File not found")
             last_error = e
             if attempt < max_retries:
-                _storage_key = None
                 time.sleep(2 ** attempt)
                 continue
             raise
