@@ -1598,22 +1598,16 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
     ext = (file.filename or "file").split(".")[-1].lower()
     content_type = file.content_type or "application/octet-stream"
 
-    # Read file in chunks to prevent memory exhaustion
-    chunks = []
-    total_size = 0
+    # Read file content
     try:
-        async for chunk in file:
-            total_size += len(chunk)
-            if total_size > MAX_UPLOAD_SIZE:
-                raise HTTPException(413, f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
-            chunks.append(chunk)
+        data = await file.read()
+        if len(data) > MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Error reading upload: {e}")
         raise HTTPException(400, "Error reading file")
-
-    data = b"".join(chunks)
     path = f"{APP_NAME}/uploads/{user['id']}/{new_id()}.{ext}"
 
     try:
