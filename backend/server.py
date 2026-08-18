@@ -1627,70 +1627,26 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
 
 @api.get("/files/{path:path}")
 async def get_file(path: str):
-    import time as _time
-
-    def _open():
-        global _storage_key
-        max_retries = 2
-        last_error = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                key = init_storage()
-                r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
-                if r.status_code == 503 and attempt < max_retries:
-                    r.close()
-                    _storage_key = None
-                    _time.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                r.raise_for_status()
-                return r
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 404:
-                    raise  # Let 404s propagate immediately
-                last_error = e
-                if attempt < max_retries:
-                    _storage_key = None
-                    _time.sleep(2 ** attempt)
-                    continue
-                raise
-            except requests.exceptions.RequestException as e:
-                last_error = e
-                if attempt < max_retries:
-                    _storage_key = None
-                    _time.sleep(2 ** attempt)
-                    continue
-                raise
-        raise last_error or Exception("Failed to fetch file")
-
+    """Serve files from S3-compatible storage."""
     try:
-        resp = await run_in_threadpool(_open)
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
+        content, content_type = await run_in_threadpool(get_object, path)
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+        if error_code == 'NoSuchKey':
             raise HTTPException(404, "File not found")
-        logger.error(f"Storage HTTP error for {path}: {e}")
+        logger.error(f"S3 error fetching {path}: {e}")
         raise HTTPException(502, "Storage error")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Storage connection error for {path}: {e}")
-        raise HTTPException(502, "Storage unavailable")
     except Exception as e:
         logger.exception(f"Unexpected error fetching file {path}: {e}")
         raise HTTPException(500, "Internal error")
 
-    ctype = resp.headers.get("Content-Type", "application/octet-stream")
-
-    def stream():
-        try:
-            for chunk in resp.iter_content(64 * 1024):
-                if chunk:
-                    yield chunk
-        finally:
-            resp.close()
-
-    headers = {"Cache-Control": "public, max-age=31536000"}
-    if resp.headers.get("Content-Length"):
-        headers["Content-Length"] = resp.headers["Content-Length"]
-    return StreamingResponse(stream(), media_type=ctype, headers=headers)
+    headers = {
+        "Cache-Control": "public, max-age=31536000",
+        "Content-Length": str(len(content))
+    }
+    return Response(content=content, media_type=content_type, headers=headers)
 
 
 # ------------------------- Admin -------------------------
