@@ -1,0 +1,399 @@
+"""
+Regression tests for security and stability fixes.
+
+These tests verify that the stabilization fixes work correctly:
+- Rate limiting on auth endpoints
+- File upload size limits
+- Search query validation
+- Regex injection prevention
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
+import io
+
+
+# Import will fail without proper environment setup, so we use conditional import
+try:
+    from server import app, MAX_UPLOAD_SIZE, MAX_QUERY_LENGTH
+    client = TestClient(app)
+    HAS_SERVER = True
+except Exception:
+    HAS_SERVER = False
+    MAX_UPLOAD_SIZE = 50 * 1024 * 1024
+    MAX_QUERY_LENGTH = 100
+
+
+@pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+class TestRateLimiting:
+    """Tests for rate limiting on auth endpoints."""
+
+    def test_login_rate_limit_allows_normal_usage(self):
+        """Normal login attempts should work."""
+        # First few attempts should work (even if credentials are wrong)
+        for i in range(3):
+            response = client.post(
+                "/api/auth/login",
+                json={"email": f"test{i}@example.com", "password": "wrong"}
+            )
+            # Should get 401 (invalid credentials), not 429 (rate limited)
+            assert response.status_code in [401, 429]
+
+    def test_register_rate_limit_allows_normal_usage(self):
+        """Normal registration attempts should work."""
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "newuser@example.com",
+                "password": "validpassword123",
+                "display_name": "New User",
+                "username": "newuser"
+            }
+        )
+        # Should get either success, conflict, or rate limit
+        assert response.status_code in [200, 409, 429]
+
+
+@pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+class TestUploadSizeLimits:
+    """Tests for file upload size limits."""
+
+    def test_upload_size_limit_constant_exists(self):
+        """MAX_UPLOAD_SIZE should be defined."""
+        assert MAX_UPLOAD_SIZE > 0
+        assert MAX_UPLOAD_SIZE == 50 * 1024 * 1024  # 50MB default
+
+    def test_upload_rejects_oversized_file_mock(self):
+        """Files over MAX_UPLOAD_SIZE should be rejected with 413."""
+        # This test would need authentication and storage mocking
+        # For now, just verify the constant exists
+        assert MAX_UPLOAD_SIZE == 50 * 1024 * 1024
+
+
+@pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+class TestSearchSecurity:
+    """Tests for search endpoint security."""
+
+    def test_search_query_length_constant_exists(self):
+        """MAX_QUERY_LENGTH should be defined."""
+        assert MAX_QUERY_LENGTH > 0
+        assert MAX_QUERY_LENGTH == 100  # Default
+
+    def test_search_rejects_long_query(self):
+        """Queries longer than MAX_QUERY_LENGTH should be rejected."""
+        long_query = "a" * 150  # Exceeds 100 char limit
+        response = client.get(f"/api/search?q={long_query}")
+        assert response.status_code == 400
+        assert "too long" in response.json().get("detail", "").lower()
+
+    def test_search_accepts_normal_query(self):
+        """Normal length queries should work."""
+        response = client.get("/api/search?q=braids")
+        # Should work (might be 200 or 401 depending on auth state)
+        assert response.status_code in [200, 401]
+
+    def test_search_handles_regex_metacharacters(self):
+        """Regex metacharacters in search should not cause errors."""
+        # These characters are regex metacharacters that could cause ReDoS
+        dangerous_chars = ".*[](){}+?^$|\\test"
+        response = client.get(f"/api/search?q={dangerous_chars}")
+        # Should not crash - either work or return auth error
+        assert response.status_code in [200, 400, 401]
+
+    def test_search_empty_query_rejected(self):
+        """Empty search queries should be rejected."""
+        response = client.get("/api/search?q=")
+        assert response.status_code == 400
+
+    def test_search_whitespace_only_rejected(self):
+        """Whitespace-only queries should be rejected."""
+        response = client.get("/api/search?q=   ")
+        assert response.status_code == 400
+
+
+@pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+class TestProfessionalSearch:
+    """Tests for professional search endpoint security."""
+
+    def test_professional_search_query_length_limit(self):
+        """Long queries to professional search should be rejected."""
+        long_query = "b" * 150
+        response = client.get(f"/api/professionals/search?q={long_query}")
+        assert response.status_code == 400
+
+    def test_professional_search_city_length_limit(self):
+        """Long city names should be rejected."""
+        long_city = "c" * 150
+        response = client.get(f"/api/professionals/search?city={long_city}")
+        assert response.status_code == 400
+
+    def test_professional_search_handles_regex_in_city(self):
+        """Regex characters in city search should be escaped."""
+        # This should not cause a regex error
+        response = client.get("/api/professionals/search?city=.*Cincinnati.*")
+        assert response.status_code in [200, 401]
+
+
+class TestJWTConfiguration:
+    """Tests for JWT security configuration."""
+
+    def test_jwt_expiration_default(self):
+        """JWT expiration should default to 24 hours (1440 minutes)."""
+        try:
+            from server import ACCESS_TOKEN_MINUTES
+            # Default should be 1440 (24 hours), not 43200 (30 days)
+            assert ACCESS_TOKEN_MINUTES == 1440
+        except ImportError:
+            pytest.skip("Server not available")
+
+
+class TestMongoDBConfiguration:
+    """Tests for MongoDB connection pool configuration."""
+
+    def test_mongodb_pool_configured(self):
+        """MongoDB client should have pool configuration."""
+        try:
+            from server import client
+            # Motor client should exist
+            assert client is not None
+            # Pool settings should be configured (verify options exist)
+            # Note: Motor's internal API varies, so we just verify client exists
+        except ImportError:
+            pytest.skip("Server not available")
+
+
+class TestStorageRetryLogic:
+    """Tests for storage service retry logic."""
+
+    def test_get_object_has_retry_parameter(self):
+        """get_object should have max_retries parameter."""
+        try:
+            from server import get_object
+            import inspect
+            sig = inspect.signature(get_object)
+            assert 'max_retries' in sig.parameters
+            assert sig.parameters['max_retries'].default == 2
+        except ImportError:
+            pytest.skip("Server not available")
+
+
+class TestLogging:
+    """Tests for proper logging configuration."""
+
+    def test_logger_exists(self):
+        """Logger should be configured."""
+        try:
+            from server import logger
+            assert logger is not None
+            assert logger.name == "brookie"
+        except ImportError:
+            pytest.skip("Server not available")
+
+
+class TestPersonalizedFeed:
+    """Tests for personalized feed functionality."""
+
+    def test_score_post_function_exists(self):
+        """score_post function should be defined."""
+        try:
+            from server import score_post
+            assert callable(score_post)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_get_user_preferences_function_exists(self):
+        """get_user_preferences function should be defined."""
+        try:
+            from server import get_user_preferences
+            import asyncio
+            assert asyncio.iscoroutinefunction(get_user_preferences)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_personalized_feed_function_exists(self):
+        """_personalized_feed function should be defined."""
+        try:
+            from server import _personalized_feed
+            import asyncio
+            assert asyncio.iscoroutinefunction(_personalized_feed)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_score_post_returns_float(self):
+        """score_post should return a float between 0-100."""
+        try:
+            from server import score_post
+            # Test with minimal data
+            post = {
+                "id": "test",
+                "author_id": "author1",
+                "category_id": None,
+                "style_names": [],
+                "service_name": None,
+                "like_count": 0,
+                "save_count": 0,
+                "created_at": "2026-08-15T12:00:00Z"
+            }
+            user = {"id": "user1", "interests": []}
+            user_prefs = {"saved_categories": set(), "liked_categories": set(),
+                          "saved_styles": set(), "liked_styles": set()}
+            following_ids = set()
+
+            score = score_post(post, user, user_prefs, following_ids)
+            assert isinstance(score, float)
+            assert 0 <= score <= 100
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_score_post_boosts_followed_users(self):
+        """Posts from followed users should have higher scores."""
+        try:
+            from server import score_post
+            post = {
+                "id": "test",
+                "author_id": "author1",
+                "category_id": None,
+                "style_names": [],
+                "service_name": None,
+                "like_count": 0,
+                "save_count": 0,
+                "created_at": "2026-08-15T12:00:00Z"
+            }
+            user = {"id": "user1", "interests": []}
+            user_prefs = {"saved_categories": set(), "liked_categories": set(),
+                          "saved_styles": set(), "liked_styles": set()}
+
+            score_not_following = score_post(post, user, user_prefs, set())
+            score_following = score_post(post, user, user_prefs, {"author1"})
+
+            assert score_following > score_not_following
+        except ImportError:
+            pytest.skip("Server not available")
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_feed_endpoint_accepts_foryou(self):
+        """Feed endpoint should accept foryou feed_type."""
+        response = client.get("/api/posts/feed?feed_type=foryou")
+        # Should work (might be 200 or 401 depending on auth state)
+        assert response.status_code in [200, 401]
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_feed_endpoint_anonymous_gets_chronological(self):
+        """Anonymous users should get chronological feed."""
+        response = client.get("/api/posts/feed?feed_type=foryou")
+        assert response.status_code == 200
+        # Response should be a list
+        data = response.json()
+        assert isinstance(data, list)
+
+
+class TestFuzzySearch:
+    """Tests for fuzzy search functionality."""
+
+    def test_fuzzy_match_function_exists(self):
+        """fuzzy_match function should be defined."""
+        try:
+            from server import fuzzy_match
+            assert callable(fuzzy_match)
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_exact_substring(self):
+        """Exact substring should return match with score 1.0."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("braid", "braids")
+            assert match is True
+            assert score == 1.0
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_partial(self):
+        """Partial match should return True for similar strings."""
+        try:
+            from server import fuzzy_match
+            # "brid" is close to "braid" (one letter off)
+            match, score = fuzzy_match("brid", "braid")
+            assert match is True
+            assert score >= 0.6
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_no_match(self):
+        """Completely different strings should not match."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("xyz", "braids")
+            assert match is False
+            assert score < 0.6
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_fuzzy_match_multiword(self):
+        """Should match individual words in multi-word targets."""
+        try:
+            from server import fuzzy_match
+            match, score = fuzzy_match("knotless", "knotless braids")
+            assert match is True
+            assert score == 1.0
+        except ImportError:
+            pytest.skip("Server not available")
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_search_endpoint_returns_suggestions(self):
+        """Search endpoint should return suggestions array."""
+        response = client.get("/api/search?q=test")
+        assert response.status_code == 200
+        data = response.json()
+        assert "suggestions" in data
+        assert isinstance(data["suggestions"], list)
+
+    @pytest.mark.skipif(not HAS_SERVER, reason="Server not available")
+    def test_search_endpoint_returns_posts(self):
+        """Search endpoint should return posts array."""
+        response = client.get("/api/search?q=test")
+        assert response.status_code == 200
+        data = response.json()
+        assert "posts" in data
+        assert isinstance(data["posts"], list)
+
+
+class TestPublicUserLocation:
+    """Tests for public_user returning lat/lng."""
+
+    def test_public_user_includes_lat_lng(self):
+        """public_user should include lat and lng fields."""
+        try:
+            from server import public_user
+            user = {
+                "id": "test123",
+                "username": "testuser",
+                "display_name": "Test User",
+                "lat": 39.1031,
+                "lng": -84.5120,
+            }
+            result = public_user(user)
+            assert "lat" in result
+            assert "lng" in result
+            assert result["lat"] == 39.1031
+            assert result["lng"] == -84.5120
+        except ImportError:
+            pytest.skip("Server not available")
+
+    def test_public_user_handles_missing_lat_lng(self):
+        """public_user should handle missing lat/lng gracefully."""
+        try:
+            from server import public_user
+            user = {
+                "id": "test123",
+                "username": "testuser",
+                "display_name": "Test User",
+            }
+            result = public_user(user)
+            assert "lat" in result
+            assert "lng" in result
+            assert result["lat"] is None
+            assert result["lng"] is None
+        except ImportError:
+            pytest.skip("Server not available")

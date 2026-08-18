@@ -1,14 +1,18 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 import logging
 import uuid
 import math
+import asyncio
 import requests
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -21,12 +25,24 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+# Configure connection pool for production stability
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=50,
+    minPoolSize=5,
+    maxIdleTimeMS=30000,
+    serverSelectionTimeoutMS=5000
+)
 db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
-ACCESS_TOKEN_MINUTES = int(os.environ.get('ACCESS_TOKEN_MINUTES', '43200'))
+# Default to 24 hours for security (was 30 days). Can be overridden via env var.
+ACCESS_TOKEN_MINUTES = int(os.environ.get('ACCESS_TOKEN_MINUTES', '1440'))
+
+# Upload limits: 50MB default, configurable via env
+MAX_UPLOAD_SIZE = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '50')) * 1024 * 1024
+MAX_QUERY_LENGTH = 100  # Prevent overly complex regex patterns
 
 # ------------------------- Object Storage -------------------------
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
@@ -54,21 +70,40 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     return resp.json()
 
 
-def get_object(path: str):
+def get_object(path: str, max_retries: int = 2):
+    """Fetch object from storage with exponential backoff on 503 errors."""
     global _storage_key
-    key = init_storage()
-    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
-    if resp.status_code == 503:
-        _storage_key = None
-        key = init_storage()
-        resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+    import time
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            key = init_storage()
+            resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+            if resp.status_code == 503 and attempt < max_retries:
+                resp.close()  # Clean up response object
+                _storage_key = None
+                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                continue
+            resp.raise_for_status()
+            return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < max_retries:
+                _storage_key = None
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    raise last_error or Exception("Storage fetch failed")
 
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
+
+# Rate limiting setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("brookie")
@@ -97,7 +132,11 @@ def hash_pw(pw: str) -> str:
 def verify_pw(pw: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(pw.encode("utf-8")[:72], hashed.encode("utf-8"))
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Password verification failed due to encoding error: {type(e).__name__}")
+        return False
+    except Exception as e:
+        logger.exception(f"Unexpected error during password verification: {e}")
         return False
 
 
@@ -126,7 +165,10 @@ async def get_optional_user(creds: HTTPAuthorizationCredentials = Depends(bearer
         return None
     try:
         return await get_current_user(creds)
-    except HTTPException:
+    except HTTPException as e:
+        # Expected auth failures (401) - don't log, just return None
+        if e.status_code != 401:
+            logger.warning(f"Unexpected auth error: {e.status_code} - {e.detail}")
         return None
 
 
@@ -139,7 +181,8 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 def public_user(u: dict) -> dict:
     return {"id": u["id"], "username": u.get("username"), "display_name": u.get("display_name"),
             "avatar_url": u.get("avatar_url"), "bio": u.get("bio"), "city": u.get("city"),
-            "state": u.get("state"), "role": u.get("role"), "is_professional": u.get("is_professional", False),
+            "state": u.get("state"), "lat": u.get("lat"), "lng": u.get("lng"),
+            "role": u.get("role"), "is_professional": u.get("is_professional", False),
             "interests": u.get("interests", []), "profile_public": u.get("profile_public", False)}
 
 
@@ -152,6 +195,35 @@ def haversine(lat1, lon1, lat2, lon2):
     dl = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+from difflib import SequenceMatcher
+
+def fuzzy_match(query: str, target: str, threshold: float = 0.6) -> tuple:
+    """
+    Returns (is_match, score) where score is 0-1 similarity ratio.
+    A score >= threshold is considered a match.
+    """
+    query = query.lower().strip()
+    target = target.lower().strip()
+
+    # Exact substring match gets highest score
+    if query in target:
+        return True, 1.0
+
+    # Word-level fuzzy matching
+    target_words = target.split()
+    best_score = 0.0
+    for word in target_words:
+        ratio = SequenceMatcher(None, query, word).ratio()
+        if ratio > best_score:
+            best_score = ratio
+
+    # Also check whole string similarity for multi-word queries
+    full_ratio = SequenceMatcher(None, query, target).ratio()
+    best_score = max(best_score, full_ratio)
+
+    return best_score >= threshold, best_score
 
 
 async def log_event(event_type: str, actor_id: Optional[str] = None, professional_id: Optional[str] = None,
@@ -216,6 +288,157 @@ async def enrich_posts(posts: list, viewer: Optional[dict]) -> list:
         p["liked"] = p["id"] in liked_ids
         p["saved"] = p["id"] in saved_ids
     return posts
+
+
+# ------------------------- Personalization -------------------------
+async def get_user_preferences(user_id: str) -> dict:
+    """Aggregate user's implicit preferences from engagement history."""
+    # Get saved and liked post IDs in parallel
+    saves_task = db.saves.find({"user_id": user_id}, {"_id": 0, "post_id": 1}).to_list(500)
+    likes_task = db.likes.find({"user_id": user_id}, {"_id": 0, "post_id": 1}).to_list(500)
+    saves, likes = await asyncio.gather(saves_task, likes_task)
+
+    saved_post_ids = [s["post_id"] for s in saves]
+    liked_post_ids = [l["post_id"] for l in likes]
+
+    # Batch fetch saved/liked posts for their categories and styles
+    all_post_ids = list(set(saved_post_ids + liked_post_ids))
+    if not all_post_ids:
+        return {"saved_categories": set(), "liked_categories": set(),
+                "saved_styles": set(), "liked_styles": set()}
+
+    posts = await db.posts.find(
+        {"id": {"$in": all_post_ids}},
+        {"_id": 0, "id": 1, "category_id": 1, "style_names": 1}
+    ).to_list(len(all_post_ids))
+    post_map = {p["id"]: p for p in posts}
+
+    saved_categories = set()
+    saved_styles = set()
+    liked_categories = set()
+    liked_styles = set()
+
+    for pid in saved_post_ids:
+        p = post_map.get(pid, {})
+        if p.get("category_id"):
+            saved_categories.add(p["category_id"])
+        for s in p.get("style_names", []):
+            saved_styles.add(s.lower())
+
+    for pid in liked_post_ids:
+        p = post_map.get(pid, {})
+        if p.get("category_id"):
+            liked_categories.add(p["category_id"])
+        for s in p.get("style_names", []):
+            liked_styles.add(s.lower())
+
+    return {
+        "saved_categories": saved_categories,
+        "liked_categories": liked_categories,
+        "saved_styles": saved_styles,
+        "liked_styles": liked_styles
+    }
+
+
+def score_post(post: dict, user: dict, user_prefs: dict, following_ids: set) -> float:
+    """Calculate personalization score for a post (0-100)."""
+    interests = [i.lower() for i in user.get("interests", [])]
+
+    # 1. Interest Score (30% weight)
+    interest_score = 0
+    post_category = post.get("category_id") or ""
+    post_styles = [s.lower() for s in post.get("style_names", [])]
+    post_service = (post.get("service_name") or "").lower()
+
+    # Check if category matches any interest (categories are UUIDs, but interests might be names)
+    if post_category and post_category.lower() in interests:
+        interest_score += 50
+    # Style match
+    for style in post_styles:
+        if style in interests:
+            interest_score += 30
+            break
+    # Service name contains interest keyword
+    for interest in interests:
+        if interest in post_service:
+            interest_score += 20
+            break
+    interest_score = min(100, interest_score)
+
+    # 2. Engagement Score (25% weight) - based on user's save/like history
+    engagement_score = 0
+    if post_category in user_prefs.get("saved_categories", set()):
+        engagement_score += 50
+    elif post_category in user_prefs.get("liked_categories", set()):
+        engagement_score += 40
+    for style in post_styles:
+        if style in user_prefs.get("saved_styles", set()):
+            engagement_score += 30
+            break
+    engagement_score = min(100, engagement_score)
+
+    # 3. Social Score (20% weight) - posts from followed users
+    social_score = 100 if post["author_id"] in following_ids else 0
+
+    # 4. Quality Score (15% weight) - post engagement metrics
+    likes = post.get("like_count", 0)
+    saves = post.get("save_count", 0)
+    engagement = likes + (saves * 3)  # Saves worth 3x likes
+    quality_score = min(100, 25 * math.log10(engagement + 1)) if engagement > 0 else 0
+
+    # 5. Recency Score (10% weight) - 7-day half-life decay
+    try:
+        created_str = post.get("created_at", "")
+        if created_str:
+            created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+            recency_score = 100 * (0.5 ** (age_hours / 168))  # 7-day half-life
+        else:
+            recency_score = 50
+    except Exception:
+        recency_score = 50  # Default for parsing errors
+
+    # Weighted total
+    total = (
+        interest_score * 0.30 +
+        engagement_score * 0.25 +
+        social_score * 0.20 +
+        quality_score * 0.15 +
+        recency_score * 0.10
+    )
+
+    return total
+
+
+async def _personalized_feed(q: dict, limit: int, viewer: dict) -> list:
+    """Generate personalized feed for authenticated user with interests."""
+    # Fetch candidate pool (3x limit for scoring diversity)
+    candidate_limit = min(limit * 3, 120)
+    candidates = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(candidate_limit)
+
+    if not candidates:
+        return []
+
+    # Get user preferences and following list in parallel
+    user_prefs, following_docs = await asyncio.gather(
+        get_user_preferences(viewer["id"]),
+        db.follows.find(
+            {"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}
+        ).to_list(1000)
+    )
+    following_ids = {f["following_id"] for f in following_docs}
+
+    # Score all candidates
+    scored = []
+    for post in candidates:
+        score = score_post(post, viewer, user_prefs, following_ids)
+        scored.append((score, post))
+
+    # Sort by score descending, take top N
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_posts = [p for _, p in scored[:limit]]
+
+    return await enrich_posts(top_posts, viewer)
 
 
 # ------------------------- Models -------------------------
@@ -344,7 +567,8 @@ class CatalogIn(BaseModel):
 
 # ------------------------- Auth -------------------------
 @api.post("/auth/register")
-async def register(body: RegisterIn):
+@limiter.limit("3/minute")
+async def register(request: Request, body: RegisterIn):
     email = body.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(409, "Email already registered")
@@ -361,7 +585,8 @@ async def register(body: RegisterIn):
 
 
 @api.post("/auth/login")
-async def login(body: LoginIn):
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginIn):
     email = body.email.strip().lower()
     user = await db.users.find_one({"email": email})
     if not user or user.get("disabled") or not verify_pw(body.password, user["password_hash"]):
@@ -531,12 +756,22 @@ async def feed(feed_type: str = "foryou", category_id: Optional[str] = None,
     q: Dict[str, Any] = {}
     if category_id:
         q["category_id"] = category_id
+
     if feed_type == "following" and viewer:
         following = await db.follows.find({"follower_id": viewer["id"]}, {"_id": 0, "following_id": 1}).to_list(1000)
         ids = [f["following_id"] for f in following]
         q["author_id"] = {"$in": ids if ids else ["__none__"]}
+        posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+        return await enrich_posts(posts, viewer)
+
     if feed_type == "nearby":
         return await _nearby_feed(q, lat, lng, radius, limit, viewer)
+
+    # "foryou" feed - personalized for authenticated users with interests
+    if feed_type == "foryou" and viewer and viewer.get("interests"):
+        return await _personalized_feed(q, limit, viewer)
+
+    # Fallback: chronological for anonymous users or users without interests
     posts = await db.posts.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
     return await enrich_posts(posts, viewer)
 
@@ -677,12 +912,15 @@ async def unlike_post(post_id: str, user: dict = Depends(get_current_user)):
 @api.get("/posts/{post_id}/comments")
 async def get_comments(post_id: str):
     comments = await db.comments.find({"post_id": post_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
-    out = []
+    if not comments:
+        return []
+    # Batch load authors to avoid N+1 queries
+    author_ids = list({c["author_id"] for c in comments})
+    authors = {u["id"]: u for u in await db.users.find({"id": {"$in": author_ids}}, {"_id": 0}).to_list(len(author_ids))}
     for c in comments:
-        author = await db.users.find_one({"id": c["author_id"]}, {"_id": 0})
+        author = authors.get(c["author_id"])
         c["author"] = public_user(author) if author else None
-        out.append(c)
-    return out
+    return comments
 
 
 @api.post("/posts/{post_id}/comments")
@@ -943,7 +1181,8 @@ async def pro_posts(pro_id: str, viewer: Optional[dict] = Depends(get_optional_u
 
 
 @api.post("/professional/verification/request")
-async def request_verification(user: dict = Depends(get_current_user)):
+@limiter.limit("2/hour")
+async def request_verification(request: Request, user: dict = Depends(get_current_user)):
     if not user.get("professional_id"):
         raise HTTPException(404, "No professional profile")
     await db.professional_profiles.update_one({"id": user["professional_id"]}, {"$set": {"verification_status": "PENDING"}})
@@ -955,17 +1194,30 @@ async def pro_analytics(user: dict = Depends(get_current_user)):
     if not user.get("professional_id"):
         raise HTTPException(404, "No professional profile")
     pid = user["professional_id"]
-    posts = await db.posts.find({"author_id": user["id"]}, {"_id": 0}).to_list(500)
-    post_ids = [p["id"] for p in posts]
+
+    # Use aggregation to sum post stats without loading all posts into memory
+    post_stats_pipeline = [
+        {"$match": {"author_id": user["id"]}},
+        {"$group": {
+            "_id": None,
+            "post_count": {"$sum": 1},
+            "post_views": {"$sum": {"$ifNull": ["$view_count", 0]}},
+            "likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
+            "saves": {"$sum": {"$ifNull": ["$save_count", 0]}}
+        }}
+    ]
+    post_stats = await db.posts.aggregate(post_stats_pipeline).to_list(1)
+    stats = post_stats[0] if post_stats else {"post_count": 0, "post_views": 0, "likes": 0, "saves": 0}
+
     return {
         "profile_views": await db.analytics_events.count_documents({"event_type": "PROFILE_VIEW", "professional_id": pid}),
-        "post_views": sum(p.get("view_count", 0) for p in posts),
-        "likes": sum(p.get("like_count", 0) for p in posts),
-        "saves": sum(p.get("save_count", 0) for p in posts),
+        "post_views": stats["post_views"],
+        "likes": stats["likes"],
+        "saves": stats["saves"],
         "followers": await db.follows.count_documents({"following_id": user["id"]}),
         "tag_confirmations": await db.posts.count_documents({"tagged_professional_id": pid, "tag_status": "confirmed"}),
         "booking_clicks": await db.analytics_events.count_documents({"event_type": "BOOKING_CLICK", "professional_id": pid}),
-        "post_count": len(post_ids),
+        "post_count": stats["post_count"],
     }
 
 
@@ -1027,27 +1279,65 @@ async def find_professionals(post_id: str, viewer: Optional[dict] = Depends(get_
 
 
 async def _rank_professionals(category_id, service_name, style_name, plat, plng, pcity, viewer):
-    pros = await db.professional_profiles.find({}, {"_id": 0}).to_list(1000)
+    """Rank professionals using aggregation pipeline to avoid N+1 queries."""
     vlat = viewer.get("lat") if viewer else None
     vlng = viewer.get("lng") if viewer else None
     base_lat = vlat if vlat is not None else plat
     base_lng = vlng if vlng is not None else plng
+
+    # Use aggregation pipeline to join professionals with their post stats in one query
+    pipeline = [
+        {"$lookup": {
+            "from": "posts",
+            "localField": "user_id",
+            "foreignField": "author_id",
+            "pipeline": [
+                {"$group": {
+                    "_id": None,
+                    "post_count": {"$sum": 1},
+                    "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
+                    "total_saves": {"$sum": {"$ifNull": ["$save_count", 0]}}
+                }}
+            ],
+            "as": "post_stats"
+        }},
+        {"$addFields": {
+            "post_count": {"$ifNull": [{"$arrayElemAt": ["$post_stats.post_count", 0]}, 0]},
+            "total_engagement": {"$add": [
+                {"$ifNull": [{"$arrayElemAt": ["$post_stats.total_likes", 0]}, 0]},
+                {"$ifNull": [{"$arrayElemAt": ["$post_stats.total_saves", 0]}, 0]}
+            ]}
+        }},
+        {"$project": {"post_stats": 0, "_id": 0}},
+        {"$limit": 500}  # Reasonable limit to prevent memory issues
+    ]
+
+    pros = await db.professional_profiles.aggregate(pipeline).to_list(500)
+
     results = []
     for pro in pros:
         svc_names = [(s.get("name") or "").lower() for s in pro.get("services", [])]
         score = 0.0
         reasons = {}
+
+        # Service match scoring
         if service_name and service_name.lower() in svc_names:
             score += 35
             reasons["service_match"] = True
         elif service_name and any(service_name.lower() in n or n in service_name.lower() for n in svc_names):
             score += 18
             reasons["service_match"] = "partial"
+
+        # Style match scoring
         if style_name and (style_name.lower() in (pro.get("bio") or "").lower() or any(style_name.lower() in n for n in svc_names)):
             score += 20
             reasons["style_match"] = True
+
+        # Category match scoring
         if category_id and category_id in pro.get("category_ids", []):
             score += 10
+
+        # Distance scoring
         dist = haversine(base_lat, base_lng, pro.get("lat"), pro.get("lng"))
         if dist is not None:
             radius = pro.get("service_radius", 25) or 25
@@ -1059,16 +1349,23 @@ async def _rank_professionals(category_id, service_name, style_name, plat, plng,
         elif pcity and pro.get("city") and pcity.lower() == pro.get("city").lower():
             score += 15
             reasons["same_city"] = True
-        pc = await db.posts.count_documents({"author_id": pro["user_id"]})
+
+        # Post count scoring (from aggregation)
+        pc = pro.get("post_count", 0)
         score += min(10, pc * 2)
-        agg = await db.posts.aggregate([{"$match": {"author_id": pro["user_id"]}},
-                                        {"$group": {"_id": None, "likes": {"$sum": "$like_count"}, "saves": {"$sum": "$save_count"}}}]).to_list(1)
-        eng = (agg[0]["likes"] + agg[0]["saves"]) if agg else 0
+
+        # Engagement scoring (from aggregation)
+        eng = pro.get("total_engagement", 0)
         score += min(10, eng / 5)
+
+        # Profile completeness scoring
         comp = sum(1 for f in [pro.get("bio"), pro.get("avatar_url"), pro.get("cover_url"), pro.get("booking_url"), pro.get("services")] if f)
         score += (comp / 5) * 5
+
+        # Verification bonus
         if pro.get("verification_status") == "VERIFIED":
             score += 3
+
         results.append({"professional": {
             "id": pro["id"], "username": pro["username"], "business_name": pro["business_name"],
             "avatar_url": pro.get("avatar_url"), "cover_url": pro.get("cover_url"), "bio": pro.get("bio"),
@@ -1076,6 +1373,7 @@ async def _rank_professionals(category_id, service_name, style_name, plat, plng,
             "services": pro.get("services", []),
             "starting_price": min([s["price"] for s in pro.get("services", []) if s.get("price")], default=None),
         }, "score": round(score, 1), "distance": round(dist, 1) if dist is not None else None, "reasons": reasons})
+
     results.sort(key=lambda r: r["score"], reverse=True)
     return results[:20]
 
@@ -1084,11 +1382,17 @@ async def _rank_professionals(category_id, service_name, style_name, plat, plng,
 async def search_professionals(q: Optional[str] = None, category_id: Optional[str] = None,
                                city: Optional[str] = None, max_distance: Optional[int] = None,
                                viewer: Optional[dict] = Depends(get_optional_user)):
+    # Validate query lengths
+    if q and len(q) > MAX_QUERY_LENGTH:
+        raise HTTPException(400, f"Search query too long. Maximum {MAX_QUERY_LENGTH} characters.")
+    if city and len(city) > MAX_QUERY_LENGTH:
+        raise HTTPException(400, f"City query too long. Maximum {MAX_QUERY_LENGTH} characters.")
+
     query: Dict[str, Any] = {}
     if category_id:
         query["category_ids"] = category_id
     if city:
-        query["city"] = {"$regex": city, "$options": "i"}
+        query["city"] = {"$regex": _re_escape(city), "$options": "i"}  # Escape regex metacharacters
     pros = await db.professional_profiles.find(query, {"_id": 0}).to_list(500)
     if q:
         ql = q.lower()
@@ -1114,23 +1418,50 @@ async def search_professionals(q: Optional[str] = None, category_id: Optional[st
 # ------------------------- Search -------------------------
 @api.get("/search")
 async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
+    # Validate query length to prevent overly complex regex patterns
+    q = q.strip()
+    if len(q) > MAX_QUERY_LENGTH:
+        raise HTTPException(400, f"Search query too long. Maximum {MAX_QUERY_LENGTH} characters.")
+    if not q:
+        raise HTTPException(400, "Search query cannot be empty")
+
     await log_event("SEARCH", viewer["id"] if viewer else None, metadata={"q": q})
-    ql = q.lower().strip()
-    import re as _re
-    rx = _re.escape(q.strip())
+    ql = q.lower()
+    rx = _re_escape(q)  # Use existing helper function for consistent escaping
+
     services = await db.services.find({"active": True}, {"_id": 0}).to_list(500)
     styles = await db.styles.find({"active": True}, {"_id": 0}).to_list(500)
     categories = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
-    suggestions = [s["name"] for s in services if ql in s["name"].lower()][:5] + \
-                  [s["name"] for s in styles if ql in s["name"].lower()][:5] + \
-                  [c["name"] for c in categories if ql in c["name"].lower()][:3]
-    # category ids whose name matches the query
-    cat_ids = [c["id"] for c in categories if ql in c["name"].lower()]
-    # author ids whose username/display name matches
+
+    # Fuzzy match services, styles, categories with scores
+    def score_items(items, key="name"):
+        scored = []
+        for item in items:
+            match, score = fuzzy_match(ql, item.get(key, ""))
+            if match:
+                scored.append((item, score))
+        return sorted(scored, key=lambda x: -x[1])
+
+    scored_services = score_items(services)
+    scored_styles = score_items(styles)
+    scored_categories = score_items(categories)
+
+    # Build suggestions from top fuzzy matches
+    suggestions = (
+        [s[0]["name"] for s in scored_services[:5]] +
+        [s[0]["name"] for s in scored_styles[:5]] +
+        [c[0]["name"] for c in scored_categories[:3]]
+    )
+
+    # Category IDs for post filtering (only high-confidence fuzzy matches)
+    cat_ids = [c[0]["id"] for c in scored_categories if c[1] >= 0.7]
+
+    # Author IDs whose username/display name matches
     matched_users = await db.users.find(
         {"$or": [{"username": {"$regex": rx, "$options": "i"}}, {"display_name": {"$regex": rx, "$options": "i"}}]},
         {"_id": 0, "id": 1}).to_list(50)
     author_ids = [u["id"] for u in matched_users]
+
     or_clauses = [
         {"caption": {"$regex": rx, "$options": "i"}},
         {"service_name": {"$regex": rx, "$options": "i"}},
@@ -1142,9 +1473,46 @@ async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
         or_clauses.append({"category_id": {"$in": cat_ids}})
     if author_ids:
         or_clauses.append({"author_id": {"$in": author_ids}})
-    posts = await db.posts.find({"$or": or_clauses}, {"_id": 0}).sort("created_at", -1).to_list(40)
+
+    # Fetch more candidates for relevance scoring
+    posts = await db.posts.find({"$or": or_clauses}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+    # Score and sort posts by relevance
+    def score_search_post(post):
+        score = 0.0
+        service = (post.get("service_name") or "").lower()
+        style = (post.get("style_name") or "").lower()
+        styles = " ".join(post.get("style_names") or []).lower()
+        caption = (post.get("caption") or "").lower()
+
+        # Direct matches in key fields score highest
+        if ql in service:
+            score += 3.0
+        elif fuzzy_match(ql, service, 0.7)[0]:
+            score += 2.0
+
+        if ql in style or ql in styles:
+            score += 2.5
+        elif fuzzy_match(ql, style, 0.7)[0] or fuzzy_match(ql, styles, 0.7)[0]:
+            score += 1.5
+
+        if ql in caption:
+            score += 1.0
+
+        # Engagement boost
+        engagement = post.get("like_count", 0) + post.get("save_count", 0) * 2
+        if engagement > 0:
+            score += min(0.5, math.log10(engagement + 1) * 0.2)
+
+        return score
+
+    scored_posts = [(p, score_search_post(p)) for p in posts]
+    scored_posts.sort(key=lambda x: -x[1])
+    posts = [p[0] for p in scored_posts[:40]]
+
     pros = await search_professionals(q=q, viewer=viewer)
-    matched_services = [s for s in services if ql in s["name"].lower()][:10]
+    matched_services = [s[0] for s in scored_services[:10]]
+
     return {
         "suggestions": list(dict.fromkeys(suggestions))[:8],
         "posts": await enrich_posts(posts, viewer),
@@ -1157,12 +1525,17 @@ async def search(q: str, viewer: Optional[dict] = Depends(get_optional_user)):
 @api.get("/notifications")
 async def get_notifications(viewer: dict = Depends(get_current_user)):
     notifs = await db.notifications.find({"user_id": viewer["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    out = []
+    if not notifs:
+        return []
+    # Batch load actors to avoid N+1 queries
+    actor_ids = list({n["actor_id"] for n in notifs if n.get("actor_id")})
+    actors = {}
+    if actor_ids:
+        actors = {u["id"]: u for u in await db.users.find({"id": {"$in": actor_ids}}, {"_id": 0}).to_list(len(actor_ids))}
     for n in notifs:
-        actor = await db.users.find_one({"id": n.get("actor_id")}, {"_id": 0}) if n.get("actor_id") else None
+        actor = actors.get(n.get("actor_id")) if n.get("actor_id") else None
         n["actor"] = public_user(actor) if actor else None
-        out.append(n)
-    return out
+    return notifs
 
 
 @api.get("/notifications/unread-count")
@@ -1198,14 +1571,35 @@ async def booking_click(professional_id: str, viewer: Optional[dict] = Depends(g
 @api.post("/upload")
 async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     ext = (file.filename or "file").split(".")[-1].lower()
-    data = await file.read()
-    path = f"{APP_NAME}/uploads/{user['id']}/{new_id()}.{ext}"
     content_type = file.content_type or "application/octet-stream"
+
+    # Read file in chunks to prevent memory exhaustion
+    chunks = []
+    total_size = 0
+    try:
+        async for chunk in file:
+            total_size += len(chunk)
+            if total_size > MAX_UPLOAD_SIZE:
+                raise HTTPException(413, f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+            chunks.append(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error reading upload: {e}")
+        raise HTTPException(400, "Error reading file")
+
+    data = b"".join(chunks)
+    path = f"{APP_NAME}/uploads/{user['id']}/{new_id()}.{ext}"
+
     try:
         await run_in_threadpool(put_object, path, data, content_type)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Storage upload failed: {e}")
+        raise HTTPException(502, "Upload to storage failed")
     except Exception as e:
-        logger.error(f"upload failed: {e}")
+        logger.exception(f"Unexpected upload error: {e}")
         raise HTTPException(502, "Upload failed")
+
     await db.media.insert_one({"id": new_id(), "owner_id": user["id"], "storage_path": path,
                                "content_type": content_type, "created_at": now_iso()})
     mtype = "video" if content_type.startswith("video") else "image"
@@ -1214,20 +1608,56 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
 
 @api.get("/files/{path:path}")
 async def get_file(path: str):
+    import time as _time
+
     def _open():
         global _storage_key
-        key = init_storage()
-        r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
-        if r.status_code == 503:
-            _storage_key = None
-            key = init_storage()
-            r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
-        r.raise_for_status()
-        return r
+        max_retries = 2
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                key = init_storage()
+                r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, stream=True, timeout=60)
+                if r.status_code == 503 and attempt < max_retries:
+                    r.close()
+                    _storage_key = None
+                    _time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                r.raise_for_status()
+                return r
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    raise  # Let 404s propagate immediately
+                last_error = e
+                if attempt < max_retries:
+                    _storage_key = None
+                    _time.sleep(2 ** attempt)
+                    continue
+                raise
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < max_retries:
+                    _storage_key = None
+                    _time.sleep(2 ** attempt)
+                    continue
+                raise
+        raise last_error or Exception("Failed to fetch file")
+
     try:
         resp = await run_in_threadpool(_open)
-    except Exception:
-        raise HTTPException(404, "File not found")
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            raise HTTPException(404, "File not found")
+        logger.error(f"Storage HTTP error for {path}: {e}")
+        raise HTTPException(502, "Storage error")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Storage connection error for {path}: {e}")
+        raise HTTPException(502, "Storage unavailable")
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching file {path}: {e}")
+        raise HTTPException(500, "Internal error")
+
     ctype = resp.headers.get("Content-Type", "application/octet-stream")
 
     def stream():
@@ -1345,6 +1775,9 @@ async def startup():
     await db.users.create_index("username")
     await db.posts.create_index([("created_at", -1)])
     await db.posts.create_index("author_id")
+    # Indexes for personalized feed preference aggregation
+    await db.saves.create_index("user_id")
+    await db.likes.create_index("user_id")
     try:
         await run_in_threadpool(init_storage)
         logger.info("storage initialized")

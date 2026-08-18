@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -50,12 +51,40 @@ export default function CreatePost() {
   const [taggedPro, setTaggedPro] = useState<any>(null);
   const [postAsPro, setPostAsPro] = useState(!!user?.is_professional);
   const [publishing, setPublishing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const STEPS = ["Media", "Caption", "Category", "Service", "Style", "Details", "Location", "Tag Pro", "Preview"];
 
   useEffect(() => {
     apiFetch<Cat[]>("/categories", { auth: false }).then(setCats).catch(() => {});
     apiFetch<Style[]>("/styles", { auth: false }).then(setStyles).catch(() => {});
+  }, []);
+
+  // Auto-detect location on mount if permission already granted
+  useEffect(() => {
+    const autoDetectLocation = async () => {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (perm.granted) {
+        setLocationLoading(true);
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          const geo = await Location.reverseGeocodeAsync({
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          });
+          if (geo[0]) {
+            setCity(geo[0].city || geo[0].subregion || "");
+            setState(geo[0].region || "");
+          }
+        } catch {
+          // Silent fail - keep profile fallback
+        } finally {
+          setLocationLoading(false);
+        }
+      }
+    };
+    autoDetectLocation();
   }, []);
 
   useEffect(() => {
@@ -195,6 +224,11 @@ export default function CreatePost() {
               {media.map((m, i) => (
                 <View key={i} style={styles.mediaThumb}>
                   <Image source={{ uri: mediaUrl(m.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                  {m.type === "video" && (
+                    <View style={styles.videoIndicator}>
+                      <MaterialCommunityIcons name="play-circle" size={28} color={colors.white} />
+                    </View>
+                  )}
                   <Pressable testID={`remove-media-${i}`} onPress={() => setMedia((arr) => arr.filter((_, x) => x !== i))} style={styles.removeMedia}>
                     <MaterialCommunityIcons name="close" size={14} color={colors.white} />
                   </Pressable>
@@ -358,7 +392,24 @@ export default function CreatePost() {
         {step === 6 && (
           <View>
             <Text style={styles.stepTitle}>Add location</Text>
-            <Btn label="Use Current Location" variant="outline" icon="crosshairs-gps" onPress={useCurrentLocation} style={{ marginVertical: spacing.md, height: 46 }} />
+            {locationLoading ? (
+              <View style={styles.locLoadingRow}>
+                <Loading />
+                <Text style={styles.locLoadingText}>Detecting your location...</Text>
+              </View>
+            ) : coords ? (
+              <View style={styles.locStatusRow}>
+                <MaterialCommunityIcons name="crosshairs-gps" size={15} color={colors.brandDeep} />
+                <Text style={styles.locStatusText}>Using your current location</Text>
+              </View>
+            ) : null}
+            <Btn
+              label={coords ? "Update Location" : "Use Current Location"}
+              variant="outline"
+              icon="crosshairs-gps"
+              onPress={useCurrentLocation}
+              style={{ marginVertical: spacing.md, height: 46 }}
+            />
             <Text style={styles.fieldLabel}>City</Text>
             <TextInput testID="create-city" value={city} onChangeText={setCity} placeholder="Cincinnati" placeholderTextColor={colors.faint} style={styles.smallInput} />
             <Text style={styles.fieldLabel}>State</Text>
@@ -395,7 +446,15 @@ export default function CreatePost() {
         {step === 8 && (
           <View>
             <Text style={styles.stepTitle}>Preview</Text>
-            {media[0] && <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />}
+            {media[0] && (
+              media[0].type === "video" ? (
+                <View style={styles.previewImg}>
+                  <PreviewVideo uri={mediaUrl(media[0].url)!} />
+                </View>
+              ) : (
+                <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />
+              )
+            )}
             {caption ? <Text style={[styles.caption]}>{caption}</Text> : null}
             <View style={styles.previewMeta}>
               <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} />
@@ -429,6 +488,15 @@ function PreviewRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function PreviewVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
+}
+
 const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   headerTitle: { fontFamily: font.bold, fontSize: 17, color: colors.onSurface },
@@ -441,6 +509,7 @@ const styles = StyleSheet.create({
   hintText: { flex: 1, fontFamily: font.medium, fontSize: 12.5, lineHeight: 18, color: colors.brandDeep },
   mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, marginTop: spacing.lg },
   mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary },
+  videoIndicator: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
   removeMedia: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
   addMedia: { width: 100, height: 130, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.borderStrong, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
   addMediaText: { fontFamily: font.semibold, fontSize: 12, color: colors.brandDeep },
@@ -458,11 +527,15 @@ const styles = StyleSheet.create({
   proResult: { padding: spacing.md, backgroundColor: colors.white, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
   proResultName: { fontFamily: font.bold, fontSize: 14, color: colors.onSurface },
   proResultHandle: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
-  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, marginTop: spacing.lg },
+  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, marginTop: spacing.lg, overflow: "hidden" },
   caption: { fontFamily: font.regular, fontSize: 15, color: colors.onSurface, marginTop: spacing.md },
   previewMeta: { marginTop: spacing.lg, gap: spacing.sm },
   prevRow: { flexDirection: "row", justifyContent: "space-between" },
   prevLabel: { fontFamily: font.semibold, fontSize: 12, color: colors.muted, letterSpacing: 0.4 },
   prevValue: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  locLoadingRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, marginBottom: spacing.sm },
+  locLoadingText: { fontFamily: font.medium, fontSize: 14, color: colors.muted },
+  locStatusRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  locStatusText: { fontFamily: font.medium, fontSize: 14, color: colors.brandDeep },
 });
