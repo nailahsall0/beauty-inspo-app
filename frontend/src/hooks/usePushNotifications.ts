@@ -1,27 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
-import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { apiFetch } from "@/src/lib/api";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Dynamically import to handle Expo Go (which lacks native modules)
+let Notifications: typeof import("expo-notifications") | null = null;
+let Device: typeof import("expo-device") | null = null;
+
+try {
+  Notifications = require("expo-notifications");
+  Device = require("expo-device");
+
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+} catch (e) {
+  console.log("Push notifications not available (Expo Go)");
+}
 
 export function usePushNotifications() {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
-  const notificationListener = useRef<Notifications.EventSubscription>();
-  const responseListener = useRef<Notifications.EventSubscription>();
+  const [notification, setNotification] = useState<any>(null);
+  const notificationListener = useRef<any>();
+  const responseListener = useRef<any>();
 
   useEffect(() => {
+    // Skip if notifications not available (Expo Go)
+    if (!Notifications || !Device) {
+      return;
+    }
+
     registerForPushNotificationsAsync().then((token) => {
       if (token) {
         setExpoPushToken(token);
@@ -34,8 +48,8 @@ export function usePushNotifications() {
     });
 
     // Listen for incoming notifications
-    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
-      setNotification(notification);
+    notificationListener.current = Notifications.addNotificationReceivedListener((notif) => {
+      setNotification(notif);
     });
 
     // Listen for notification responses (when user taps notification)
@@ -49,10 +63,10 @@ export function usePushNotifications() {
     });
 
     return () => {
-      if (notificationListener.current) {
+      if (notificationListener.current && Notifications) {
         Notifications.removeNotificationSubscription(notificationListener.current);
       }
-      if (responseListener.current) {
+      if (responseListener.current && Notifications) {
         Notifications.removeNotificationSubscription(responseListener.current);
       }
     };
@@ -62,6 +76,12 @@ export function usePushNotifications() {
 }
 
 async function registerForPushNotificationsAsync(): Promise<string | null> {
+  // Skip if native modules not available
+  if (!Notifications || !Device) {
+    console.log("Push notifications not available");
+    return null;
+  }
+
   if (!Device.isDevice) {
     console.log("Push notifications require a physical device");
     return null;
