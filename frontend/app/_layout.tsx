@@ -12,9 +12,15 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
 import { ToastProvider } from "@/src/components/Toast";
 import { colors } from "@/src/theme/tokens";
+import { usePushNotifications } from "@/src/hooks/usePushNotifications";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
+
+function PushNotificationHandler() {
+  usePushNotifications();
+  return null;
+}
 
 export default function RootLayout() {
   const [iconsLoaded, iconsError] = useIconFonts();
@@ -42,6 +48,7 @@ export default function RootLayout() {
           <AuthProvider>
             <ToastProvider>
               <StatusBar style="dark" />
+              <PushNotificationHandler />
               <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="(auth)" />
@@ -49,6 +56,8 @@ export default function RootLayout() {
                 <Stack.Screen name="create" options={{ presentation: "modal" }} />
                 <Stack.Screen name="post/[id]" />
                 <Stack.Screen name="find-pro/[postId]" options={{ presentation: "modal" }} />
+                <Stack.Screen name="messages/index" />
+                <Stack.Screen name="messages/[id]" />
               </Stack>
             </ToastProvider>
           </AuthProvider>

@@ -57,6 +57,18 @@ export default function ProfessionalProfile() {
 
   const openUrl = (url: string) => Linking.openURL(url).catch(() => toast.show("Couldn't open link", "error"));
 
+  const startMessage = async () => {
+    try {
+      const result = await apiFetch<{ conversation_id: string }>("/conversations", {
+        method: "POST",
+        body: { professional_id: pro.id, text: "Hi! I'd love to learn more about your services." }
+      });
+      router.push(`/messages/${result.conversation_id}`);
+    } catch (e: any) {
+      toast.show(e.message || "Could not start conversation", "error");
+    }
+  };
+
   const handle = (v: string) => v.trim().replace(/^@/, "").replace(/\/+$/, "");
   const instagramUrl = pro.instagram
     ? (/^https?:\/\//i.test(pro.instagram) ? pro.instagram : `https://instagram.com/${handle(pro.instagram)}`)
@@ -108,6 +120,9 @@ export default function ProfessionalProfile() {
           <View style={styles.actionsRow}>
             {!isOwn && (
               <Btn testID="pro-follow" label={following ? "Following" : "Follow"} variant={following ? "outline" : "primary"} onPress={toggleFollow} style={{ flex: 1, height: 46 }} />
+            )}
+            {!isOwn && (
+              <IconBtn testID="pro-message" icon="message-outline" onPress={startMessage} bg={colors.surfaceSecondary} />
             )}
             {isOwn && (
               <Btn testID="pro-analytics" label="View Analytics" variant="outline" icon="chart-line" onPress={() => router.push("/professional/analytics")} style={{ flex: 1, height: 46 }} />

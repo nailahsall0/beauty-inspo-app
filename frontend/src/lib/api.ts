@@ -46,7 +46,6 @@ export async function apiFetch<T = any>(path: string, opts: Options = {}): Promi
 // Multipart upload of a picked media asset. Returns { url, type }.
 export async function uploadMedia(uri: string, name: string, type: string): Promise<{ url: string; type: string }> {
   const token = await storage.secureGet(TOKEN_KEY, "");
-  console.log("[uploadMedia] Starting upload:", { uri: uri.substring(0, 50), name, type, hasToken: !!token });
   const form = new FormData();
   if (Platform.OS === "web") {
     const blob = await (await fetch(uri)).blob();
@@ -54,23 +53,14 @@ export async function uploadMedia(uri: string, name: string, type: string): Prom
   } else {
     form.append("file", { uri, name, type } as any);
   }
-  try {
-    const res = await fetch(`${API}/upload`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: form,
-    });
-    console.log("[uploadMedia] Response status:", res.status);
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.log("[uploadMedia] Error response:", errorText);
-      throw new Error(`Upload failed: ${res.status} - ${errorText}`);
-    }
-    const data = await res.json();
-    console.log("[uploadMedia] Success:", data);
-    return data;
-  } catch (err) {
-    console.log("[uploadMedia] Exception:", err);
-    throw err;
+  const res = await fetch(`${API}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Upload failed: ${res.status}`);
   }
+  return res.json();
 }

@@ -26,6 +26,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   // Nearby / location
   const [locState, setLocState] = useState<LocState>("idle");
@@ -76,6 +77,7 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       apiFetch<{ count: number }>("/notifications/unread-count").then((d) => setUnread(d.count)).catch(() => {});
+      apiFetch<{ count: number }>("/conversations/unread-count").then((d) => setUnreadMessages(d.count)).catch(() => {});
     }, [])
   );
 
@@ -139,6 +141,10 @@ export default function Home() {
           <View style={styles.headerActions}>
             <Pressable testID="home-search" onPress={() => router.push("/(tabs)/discover")} style={styles.iconBtn}>
               <MaterialCommunityIcons name="magnify" size={22} color={colors.onSurface} />
+            </Pressable>
+            <Pressable testID="home-messages" onPress={() => router.push("/messages")} style={styles.iconBtn}>
+              <MaterialCommunityIcons name="message-outline" size={21} color={colors.onSurface} />
+              {unreadMessages > 0 && <View style={styles.badge} />}
             </Pressable>
             <Pressable testID="home-notifications" onPress={() => router.push("/notifications")} style={styles.iconBtn}>
               <MaterialCommunityIcons name="bell-outline" size={21} color={colors.onSurface} />

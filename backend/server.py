@@ -1,7 +1,8 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import httpx
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1655,6 +1656,343 @@ async def get_file(path: str):
         "Content-Length": str(len(content))
     }
     return Response(content=content, media_type=content_type, headers=headers)
+
+
+# ------------------------- Messaging -------------------------
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time messaging."""
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}  # user_id -> [connections]
+
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, user_id: str):
+        if user_id in self.active_connections:
+            self.active_connections[user_id] = [
+                ws for ws in self.active_connections[user_id] if ws != websocket
+            ]
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def send_to_user(self, user_id: str, message: dict):
+        if user_id in self.active_connections:
+            for connection in self.active_connections[user_id]:
+                try:
+                    await connection.send_json(message)
+                except:
+                    pass
+
+ws_manager = ConnectionManager()
+
+
+async def send_push_notification(push_token: str, title: str, body: str, data: dict = None):
+    """Send push notification via Expo Push API."""
+    if not push_token or not push_token.startswith("ExponentPushToken"):
+        return
+    message = {
+        "to": push_token,
+        "sound": "default",
+        "title": title,
+        "body": body,
+        "data": data or {}
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "https://exp.host/--/api/v2/push/send",
+                json=message,
+                headers={"Content-Type": "application/json"}
+            )
+    except Exception as e:
+        logger.error(f"Push notification failed: {e}")
+
+
+class SendMessageBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    post_id: Optional[str] = None  # Optional post reference
+
+
+class StartConversationBody(BaseModel):
+    professional_id: str
+    text: str = Field(..., min_length=1, max_length=2000)
+    post_id: Optional[str] = None
+
+
+@api.get("/conversations")
+async def list_conversations(user: dict = Depends(get_current_user)):
+    """List all conversations for the current user."""
+    convos = await db.conversations.find(
+        {"participants": user["id"]}, {"_id": 0}
+    ).sort("last_message_at", -1).to_list(100)
+
+    # Enrich with participant info and last message
+    for c in convos:
+        other_id = [p for p in c["participants"] if p != user["id"]][0]
+        other_user = await db.users.find_one({"id": other_id}, {"_id": 0, "password_hash": 0})
+        c["other_user"] = other_user
+
+        # Get professional info if this is a pro conversation
+        if c.get("professional_id"):
+            pro = await db.professional_profiles.find_one({"id": c["professional_id"]}, {"_id": 0})
+            c["professional"] = pro
+
+        # Get last message
+        last_msg = await db.messages.find_one(
+            {"conversation_id": c["id"]}, {"_id": 0}
+        ).sort("created_at", -1)
+        c["last_message"] = last_msg
+
+        # Unread count
+        c["unread_count"] = await db.messages.count_documents({
+            "conversation_id": c["id"],
+            "sender_id": {"$ne": user["id"]},
+            "read": False
+        })
+
+    return convos
+
+
+@api.post("/conversations")
+async def start_conversation(body: StartConversationBody, user: dict = Depends(get_current_user)):
+    """Start a new conversation with a professional."""
+    # Get the professional
+    pro = await db.professional_profiles.find_one({"id": body.professional_id}, {"_id": 0})
+    if not pro:
+        raise HTTPException(404, "Professional not found")
+
+    pro_user_id = pro["user_id"]
+
+    # Check if conversation already exists
+    existing = await db.conversations.find_one({
+        "participants": {"$all": [user["id"], pro_user_id]},
+        "professional_id": body.professional_id
+    })
+
+    if existing:
+        # Add message to existing conversation
+        conv_id = existing["id"]
+    else:
+        # Create new conversation
+        conv_id = new_id()
+        await db.conversations.insert_one({
+            "id": conv_id,
+            "participants": [user["id"], pro_user_id],
+            "professional_id": body.professional_id,
+            "created_at": now_iso(),
+            "last_message_at": now_iso()
+        })
+
+    # Create the message
+    msg_id = new_id()
+    msg = {
+        "id": msg_id,
+        "conversation_id": conv_id,
+        "sender_id": user["id"],
+        "text": body.text,
+        "post_id": body.post_id,
+        "read": False,
+        "created_at": now_iso()
+    }
+    await db.messages.insert_one(msg)
+
+    # Update conversation last_message_at
+    await db.conversations.update_one(
+        {"id": conv_id},
+        {"$set": {"last_message_at": now_iso()}}
+    )
+
+    # Enrich message with post info if tagged
+    if body.post_id:
+        post = await db.posts.find_one({"id": body.post_id}, {"_id": 0})
+        msg["post"] = post
+
+    # Add sender info
+    msg["sender"] = {
+        "id": user["id"],
+        "username": user.get("username"),
+        "display_name": user.get("display_name"),
+        "avatar_url": user.get("avatar_url")
+    }
+
+    # Send real-time update to recipient
+    await ws_manager.send_to_user(pro_user_id, {
+        "type": "new_message",
+        "conversation_id": conv_id,
+        "message": msg
+    })
+
+    # Send push notification
+    pro_user = await db.users.find_one({"id": pro_user_id}, {"_id": 0})
+    if pro_user and pro_user.get("push_token"):
+        sender_name = user.get("display_name") or user.get("username") or "Someone"
+        await send_push_notification(
+            pro_user["push_token"],
+            f"Message from {sender_name}",
+            body.text[:100],
+            {"conversation_id": conv_id}
+        )
+
+    return {"conversation_id": conv_id, "message": msg}
+
+
+@api.get("/conversations/{conv_id}/messages")
+async def get_messages(conv_id: str, limit: int = 50, before: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Get messages in a conversation."""
+    # Verify user is participant
+    convo = await db.conversations.find_one({"id": conv_id}, {"_id": 0})
+    if not convo or user["id"] not in convo["participants"]:
+        raise HTTPException(404, "Conversation not found")
+
+    query = {"conversation_id": conv_id}
+    if before:
+        query["created_at"] = {"$lt": before}
+
+    messages = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+    # Enrich with sender info and post info
+    sender_ids = list(set(m["sender_id"] for m in messages))
+    senders = {u["id"]: u for u in await db.users.find(
+        {"id": {"$in": sender_ids}}, {"_id": 0, "password_hash": 0}
+    ).to_list(len(sender_ids))}
+
+    post_ids = [m["post_id"] for m in messages if m.get("post_id")]
+    posts = {}
+    if post_ids:
+        posts = {p["id"]: p for p in await db.posts.find(
+            {"id": {"$in": post_ids}}, {"_id": 0}
+        ).to_list(len(post_ids))}
+
+    for m in messages:
+        m["sender"] = senders.get(m["sender_id"])
+        if m.get("post_id"):
+            m["post"] = posts.get(m["post_id"])
+
+    # Mark messages as read
+    await db.messages.update_many(
+        {"conversation_id": conv_id, "sender_id": {"$ne": user["id"]}, "read": False},
+        {"$set": {"read": True}}
+    )
+
+    return messages[::-1]  # Return in chronological order
+
+
+@api.post("/conversations/{conv_id}/messages")
+async def send_message(conv_id: str, body: SendMessageBody, user: dict = Depends(get_current_user)):
+    """Send a message in an existing conversation."""
+    # Verify user is participant
+    convo = await db.conversations.find_one({"id": conv_id}, {"_id": 0})
+    if not convo or user["id"] not in convo["participants"]:
+        raise HTTPException(404, "Conversation not found")
+
+    # Get recipient
+    recipient_id = [p for p in convo["participants"] if p != user["id"]][0]
+
+    # Create message
+    msg_id = new_id()
+    msg = {
+        "id": msg_id,
+        "conversation_id": conv_id,
+        "sender_id": user["id"],
+        "text": body.text,
+        "post_id": body.post_id,
+        "read": False,
+        "created_at": now_iso()
+    }
+    await db.messages.insert_one(msg)
+
+    # Update conversation
+    await db.conversations.update_one(
+        {"id": conv_id},
+        {"$set": {"last_message_at": now_iso()}}
+    )
+
+    # Enrich message
+    msg["sender"] = {
+        "id": user["id"],
+        "username": user.get("username"),
+        "display_name": user.get("display_name"),
+        "avatar_url": user.get("avatar_url")
+    }
+    if body.post_id:
+        post = await db.posts.find_one({"id": body.post_id}, {"_id": 0})
+        msg["post"] = post
+
+    # Send real-time update
+    await ws_manager.send_to_user(recipient_id, {
+        "type": "new_message",
+        "conversation_id": conv_id,
+        "message": msg
+    })
+
+    # Send push notification
+    recipient = await db.users.find_one({"id": recipient_id}, {"_id": 0})
+    if recipient and recipient.get("push_token"):
+        sender_name = user.get("display_name") or user.get("username") or "Someone"
+        await send_push_notification(
+            recipient["push_token"],
+            f"Message from {sender_name}",
+            body.text[:100],
+            {"conversation_id": conv_id}
+        )
+
+    return msg
+
+
+@api.get("/conversations/unread-count")
+async def unread_count(user: dict = Depends(get_current_user)):
+    """Get total unread message count."""
+    # Get all user's conversations
+    convos = await db.conversations.find(
+        {"participants": user["id"]}, {"id": 1}
+    ).to_list(100)
+    conv_ids = [c["id"] for c in convos]
+
+    count = await db.messages.count_documents({
+        "conversation_id": {"$in": conv_ids},
+        "sender_id": {"$ne": user["id"]},
+        "read": False
+    })
+    return {"count": count}
+
+
+@api.put("/users/me/push-token")
+async def update_push_token(body: dict, user: dict = Depends(get_current_user)):
+    """Update user's Expo push token."""
+    token = body.get("push_token")
+    if token and not token.startswith("ExponentPushToken"):
+        raise HTTPException(400, "Invalid push token format")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"push_token": token}})
+    return {"ok": True}
+
+
+@app.websocket("/ws/{token}")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    """WebSocket endpoint for real-time messaging."""
+    # Authenticate via token
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=4001)
+            return
+    except jwt.PyJWTError:
+        await websocket.close(code=4001)
+        return
+
+    await ws_manager.connect(websocket, user_id)
+    try:
+        while True:
+            # Keep connection alive, handle pings
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, user_id)
 
 
 # ------------------------- Admin -------------------------
