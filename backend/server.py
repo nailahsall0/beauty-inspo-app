@@ -1799,6 +1799,7 @@ async def start_conversation(body: StartConversationBody, user: dict = Depends(g
         "created_at": now_iso()
     }
     await db.messages.insert_one(msg)
+    msg.pop("_id", None)  # Remove MongoDB ObjectId before returning
 
     # Update conversation last_message_at
     await db.conversations.update_one(
@@ -1904,6 +1905,7 @@ async def send_message(conv_id: str, body: SendMessageBody, user: dict = Depends
         "created_at": now_iso()
     }
     await db.messages.insert_one(msg)
+    msg.pop("_id", None)  # Remove MongoDB ObjectId before returning
 
     # Update conversation
     await db.conversations.update_one(
