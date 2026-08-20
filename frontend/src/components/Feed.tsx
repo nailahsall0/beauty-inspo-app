@@ -1,9 +1,10 @@
 import React from "react";
-import { View, Pressable, StyleSheet, useWindowDimensions } from "react-native";
+import { View, Pressable, StyleSheet, useWindowDimensions, Text } from "react-native";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useRouter } from "expo-router";
-import { colors, spacing, radius } from "@/src/theme/tokens";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { colors, spacing, radius, font } from "@/src/theme/tokens";
 import { mediaUrl } from "@/src/lib/api";
 
 export type Post = {
@@ -22,6 +23,7 @@ export type Post = {
   tagged_professional?: any;
   attributes?: Record<string, any>;
   professional_details?: string | null;
+  distance?: number | null;
 };
 
 export function FeedCard({ post, width }: { post: Post; width: number }) {
@@ -42,6 +44,12 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
         ) : url ? (
           <Image source={{ uri: url }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={250} />
         ) : null}
+        {post.distance != null && (
+          <View style={styles.distanceBadge}>
+            <MaterialCommunityIcons name="map-marker" size={12} color={colors.white} />
+            <Text style={styles.distanceText}>{post.distance} mi</Text>
+          </View>
+        )}
       </View>
     </Pressable>
   );
@@ -107,5 +115,22 @@ const styles = StyleSheet.create({
     height: 24,
     alignItems: "center",
     justifyContent: "center",
+  },
+  distanceBadge: {
+    position: "absolute",
+    bottom: spacing.sm,
+    left: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  distanceText: {
+    fontFamily: font.semibold,
+    fontSize: 11,
+    color: colors.white,
   },
 });
