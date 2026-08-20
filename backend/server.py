@@ -832,19 +832,24 @@ async def _nearby_feed(q: Dict[str, Any], lat: Optional[float], lng: Optional[fl
     selected: list = []
     dist_map: Dict[str, float] = {}
     if base_lat is not None and base_lng is not None:
+        # Filter posts by actual GPS distance - only include posts with coordinates
         for p in candidates:
             plat, plng = _post_coords(p, pros)
+            if plat is None or plng is None:
+                continue  # Skip posts without GPS coordinates
             d = haversine(base_lat, base_lng, plat, plng)
             if d is not None and d <= radius:
                 dist_map[p["id"]] = round(d, 1)
                 selected.append(p)
         selected.sort(key=lambda p: dist_map[p["id"]])
     elif viewer_city:
-        # No coordinates available (permission denied, no saved coords): match on saved city.
+        # No viewer coordinates - match posts by city AND require posts to have coordinates
         vc = viewer_city.strip().lower()
         for p in candidates:
             pc = (p.get("city") or "").strip().lower()
-            if pc and pc == vc:
+            plat, plng = _post_coords(p, pros)
+            # Only include if city matches AND post has GPS coordinates
+            if pc and pc == vc and plat is not None and plng is not None:
                 selected.append(p)
     else:
         return []
