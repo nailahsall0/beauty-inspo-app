@@ -184,8 +184,8 @@ export default function CreatePost() {
         style_name: selectedStyles[0] || null,
         style_names: selectedStyles,
         attributes: Object.fromEntries(Object.entries(attrs).filter(([, v]) => v)),
-        city: city || null,
-        state: state || null,
+        city: coords ? (city || null) : null,
+        state: coords ? (state || null) : null,
         lat: coords?.lat ?? null,
         lng: coords?.lng ?? null,
         tagged_professional_id: taggedPro?.id || null,
@@ -392,28 +392,36 @@ export default function CreatePost() {
         {step === 6 && (
           <View>
             <Text style={styles.stepTitle}>Add location</Text>
+            <Text style={type.body}>Help people nearby discover your look.</Text>
+            <View style={styles.hint}>
+              <MaterialCommunityIcons name="map-marker-radius-outline" size={16} color={colors.brandDeep} />
+              <Text style={styles.hintText}>Adding your location helps your post appear in the Nearby feed so local beauty lovers and pros can find it.</Text>
+            </View>
             {locationLoading ? (
               <View style={styles.locLoadingRow}>
                 <Loading />
                 <Text style={styles.locLoadingText}>Detecting your location...</Text>
               </View>
             ) : coords ? (
-              <View style={styles.locStatusRow}>
-                <MaterialCommunityIcons name="crosshairs-gps" size={15} color={colors.brandDeep} />
-                <Text style={styles.locStatusText}>Using your current location</Text>
+              <View style={[styles.locStatusRow, { marginTop: spacing.lg }]}>
+                <MaterialCommunityIcons name="check-circle" size={18} color={colors.brandDeep} />
+                <Text style={styles.locStatusText}>
+                  {city && state ? `${city}, ${state}` : "Location added"}
+                </Text>
               </View>
             ) : null}
             <Btn
-              label={coords ? "Update Location" : "Use Current Location"}
-              variant="outline"
+              label={coords ? "Update Location" : "Use My Location"}
+              variant={coords ? "outline" : "primary"}
               icon="crosshairs-gps"
               onPress={useCurrentLocation}
-              style={{ marginVertical: spacing.md, height: 46 }}
+              style={{ marginTop: spacing.lg, height: 46 }}
             />
-            <Text style={styles.fieldLabel}>City</Text>
-            <TextInput testID="create-city" value={city} onChangeText={setCity} placeholder="Cincinnati" placeholderTextColor={colors.faint} style={styles.smallInput} />
-            <Text style={styles.fieldLabel}>State</Text>
-            <TextInput testID="create-state" value={state} onChangeText={setState} placeholder="OH" placeholderTextColor={colors.faint} style={styles.smallInput} />
+            {!coords && (
+              <Text style={[type.caption, { marginTop: spacing.sm, color: colors.muted, textAlign: "center" }]}>
+                Skip if you prefer not to share location
+              </Text>
+            )}
           </View>
         )}
 
@@ -460,7 +468,7 @@ export default function CreatePost() {
               <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} />
               <PreviewRow label="Service" value={svcMode === "custom" ? customService : svc?.name} />
               <PreviewRow label="Style" value={selectedStyles.join(", ")} />
-              <PreviewRow label="Location" value={[city, state].filter(Boolean).join(", ")} />
+              <PreviewRow label="Location" value={coords ? [city, state].filter(Boolean).join(", ") || "Added" : undefined} />
               <PreviewRow label="Tagged" value={taggedPro ? `@${taggedPro.username}` : undefined} />
             </View>
           </View>
