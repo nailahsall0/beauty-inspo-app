@@ -1206,7 +1206,10 @@ async def pro_posts(pro_id: str, viewer: Optional[dict] = Depends(get_optional_u
         await db.professional_profiles.find_one({"username": pro_id.lower()}, {"_id": 0})
     if not pro:
         raise HTTPException(404, "Professional not found")
-    posts = await db.posts.find({"author_id": pro["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Only show posts made as professional, not personal customer posts
+    posts = await db.posts.find(
+        {"author_id": pro["user_id"], "post_type": "professional"}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
     return await enrich_posts(posts, viewer)
 
 
