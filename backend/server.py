@@ -1742,10 +1742,10 @@ async def list_conversations(user: dict = Depends(get_current_user)):
             c["professional"] = pro
 
         # Get last message
-        last_msg = await db.messages.find_one(
+        last_msgs = await db.messages.find(
             {"conversation_id": c["id"]}, {"_id": 0}
-        ).sort("created_at", -1)
-        c["last_message"] = last_msg
+        ).sort("created_at", -1).limit(1).to_list(1)
+        c["last_message"] = last_msgs[0] if last_msgs else None
 
         # Unread count
         c["unread_count"] = await db.messages.count_documents({
