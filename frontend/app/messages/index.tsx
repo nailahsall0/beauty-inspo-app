@@ -8,6 +8,7 @@ import { formatDistanceToNow } from "date-fns";
 import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Loading } from "@/src/components/ui";
+import { useAuth } from "@/src/context/AuthContext";
 
 type Conversation = {
   id: string;
@@ -21,6 +22,7 @@ type Conversation = {
 export default function MessagesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,11 +57,16 @@ export default function MessagesScreen() {
   };
 
   const renderConversation = ({ item }: { item: Conversation }) => {
-    const displayName = item.professional?.business_name ||
-      item.other_user?.display_name ||
-      item.other_user?.username ||
-      "User";
-    const avatar = item.professional?.avatar_url || item.other_user?.avatar_url;
+    // Determine if the other user is a professional (not me)
+    const otherIsPro = item.professional && item.professional.user_id === item.other_user?.id;
+    // Determine if I'm the professional in this conversation
+    const iAmThePro = item.professional && item.professional.id === user?.professional_id;
+
+    // Always show the other user's info
+    const displayName = otherIsPro
+      ? item.professional.business_name || item.other_user?.display_name
+      : item.other_user?.display_name || item.other_user?.username || "User";
+    const avatar = item.other_user?.avatar_url;
     const lastText = item.last_message?.text || "No messages yet";
     const isUnread = item.unread_count > 0;
 
@@ -78,9 +85,21 @@ export default function MessagesScreen() {
         </View>
         <View style={styles.convoContent}>
           <View style={styles.convoHeader}>
-            <Text style={[styles.convoName, isUnread && styles.unreadText]} numberOfLines={1}>
-              {displayName}
-            </Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.convoName, isUnread && styles.unreadText]} numberOfLines={1}>
+                {displayName}
+              </Text>
+              {otherIsPro && (
+                <View style={styles.proBadge}>
+                  <Text style={styles.proBadgeText}>PRO</Text>
+                </View>
+              )}
+              {iAmThePro && (
+                <View style={styles.clientBadge}>
+                  <Text style={styles.clientBadgeText}>Client</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.convoTime}>{formatTime(item.last_message_at)}</Text>
           </View>
           <View style={styles.convoPreview}>
@@ -173,7 +192,12 @@ const styles = StyleSheet.create({
   avatarImg: { width: "100%", height: "100%" },
   convoContent: { flex: 1 },
   convoHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  convoName: { fontFamily: font.semibold, fontSize: 15, color: colors.onSurface, flex: 1 },
+  nameRow: { flexDirection: "row", alignItems: "center", flex: 1, gap: spacing.xs },
+  convoName: { fontFamily: font.semibold, fontSize: 15, color: colors.onSurface, flexShrink: 1 },
+  proBadge: { backgroundColor: colors.brandTertiary, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  proBadgeText: { fontFamily: font.bold, fontSize: 9, color: colors.brandDeep, letterSpacing: 0.5 },
+  clientBadge: { backgroundColor: colors.surfaceTertiary, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  clientBadgeText: { fontFamily: font.semibold, fontSize: 9, color: colors.muted },
   convoTime: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
   convoPreview: { flexDirection: "row", alignItems: "center", marginTop: 2 },
   convoText: { fontFamily: font.regular, fontSize: 14, color: colors.muted, flex: 1 },

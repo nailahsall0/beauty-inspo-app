@@ -144,15 +144,16 @@ export default function PostDetail() {
           apiFetch<any[]>("/professionals/search?limit=10").catch(() => []),
         ]);
 
-        // Extract professionals from conversations
+        // Extract professionals from conversations (exclude self)
+        const myProId = user?.professional_id;
         const convoPros = convos
-          .filter((c) => c.professional)
+          .filter((c) => c.professional && c.professional.id !== myProId)
           .map((c) => ({ ...c.professional, from_conversation: true, conversation_id: c.id }));
 
-        // Combine and dedupe
+        // Combine and dedupe (exclude self)
         const allPros = [...convoPros];
         for (const p of nearby) {
-          if (!allPros.find((x) => x.id === p.id)) {
+          if (p.id !== myProId && !allPros.find((x) => x.id === p.id)) {
             allPros.push(p);
           }
         }

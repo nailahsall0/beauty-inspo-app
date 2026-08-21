@@ -34,6 +34,8 @@ export default function ChatScreen() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [otherUser, setOtherUser] = useState<any>(null);
+  const [otherIsPro, setOtherIsPro] = useState(false);
+  const [iAmThePro, setIAmThePro] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Post attachment
@@ -60,7 +62,22 @@ export default function ChatScreen() {
         const convos = await apiFetch<any[]>("/conversations");
         const convo = convos.find((c) => c.id === conversationId);
         if (convo) {
-          setOtherUser(convo.professional || convo.other_user);
+          // other_user is always the other participant
+          const other = convo.other_user;
+
+          // Check if other user is the professional
+          const otherPro = convo.professional && convo.professional.user_id === other?.id;
+          setOtherIsPro(otherPro);
+
+          // Check if I am the professional in this conversation
+          const mePro = convo.professional && convo.professional.id === user?.professional_id;
+          setIAmThePro(mePro);
+
+          // If they're a professional, include their business name
+          if (otherPro) {
+            other.business_name = convo.professional.business_name;
+          }
+          setOtherUser(other);
         }
       } catch (e) {
         console.error("Failed to load conversation:", e);
@@ -68,7 +85,7 @@ export default function ChatScreen() {
     };
     loadConvo();
     loadMessages();
-  }, [conversationId, loadMessages]);
+  }, [conversationId, loadMessages, user?.professional_id]);
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -220,10 +237,22 @@ export default function ChatScreen() {
           <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onSurface} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
-          {otherUser?.username && (
-            <Text style={styles.headerUsername}>@{otherUser.username}</Text>
-          )}
+          <View style={styles.headerNameRow}>
+            <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
+            {otherIsPro && (
+              <View style={styles.proBadge}>
+                <Text style={styles.proBadgeText}>PRO</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.headerSubRow}>
+            {otherUser?.username && (
+              <Text style={styles.headerUsername}>@{otherUser.username}</Text>
+            )}
+            {iAmThePro && (
+              <Text style={styles.headerContext}> · Messaging your Pro account</Text>
+            )}
+          </View>
         </View>
         <View style={{ width: 24 }} />
       </View>
@@ -346,8 +375,13 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   headerCenter: { flex: 1 },
+  headerNameRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   headerName: { fontFamily: font.bold, fontSize: 16, color: colors.onSurface },
+  headerSubRow: { flexDirection: "row", alignItems: "center" },
   headerUsername: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
+  headerContext: { fontFamily: font.medium, fontSize: 11, color: colors.brandDeep },
+  proBadge: { backgroundColor: colors.brandTertiary, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  proBadgeText: { fontFamily: font.bold, fontSize: 9, color: colors.brandDeep, letterSpacing: 0.5 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   messagesList: { padding: spacing.md, gap: spacing.sm },
   msgRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, maxWidth: "85%" },
