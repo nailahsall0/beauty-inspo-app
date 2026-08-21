@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
-  View, Text, StyleSheet, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform
+  View, Text, StyleSheet, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, Modal, ScrollView
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "expo-image";
@@ -35,6 +35,11 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [otherUser, setOtherUser] = useState<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Post attachment
+  const [showPostPicker, setShowPostPicker] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [myPosts, setMyPosts] = useState<any[]>([]);
 
   // Load messages
   const loadMessages = useCallback(async () => {
@@ -119,6 +124,18 @@ export default function ChatScreen() {
     };
   }, [conversationId]);
 
+  const openPostPicker = async () => {
+    setShowPostPicker(true);
+    if (myPosts.length === 0 && user?.id) {
+      try {
+        const posts = await apiFetch<any[]>(`/users/${user.id}/posts`);
+        setMyPosts(posts);
+      } catch (e) {
+        console.error("Failed to load posts:", e);
+      }
+    }
+  };
+
   const sendMessage = async () => {
     if (!text.trim() || sending) return;
 
@@ -127,15 +144,20 @@ export default function ChatScreen() {
     setText("");
 
     try {
+      const body: any = { text: messageText };
+      if (selectedPost) {
+        body.post_id = selectedPost.id;
+      }
       const msg = await apiFetch<Message>(`/conversations/${conversationId}/messages`, {
         method: "POST",
-        body: { text: messageText },
+        body,
       });
       // Message will come through WebSocket, but add it immediately for responsiveness
       setMessages((prev) => {
         if (prev.find((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+      setSelectedPost(null); // Clear selected post after sending
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -222,8 +244,31 @@ export default function ChatScreen() {
         />
       )}
 
+      {/* Selected post preview */}
+      {selectedPost && (
+        <View style={styles.selectedPostBar}>
+          <View style={styles.selectedPostContent}>
+            {selectedPost.media?.[0] && (
+              <Image
+                source={{ uri: mediaUrl(selectedPost.media[0].url) }}
+                style={styles.selectedPostThumb}
+              />
+            )}
+            <Text style={styles.selectedPostText} numberOfLines={1}>
+              {selectedPost.caption || "Post attached"}
+            </Text>
+          </View>
+          <Pressable onPress={() => setSelectedPost(null)} hitSlop={8}>
+            <MaterialCommunityIcons name="close" size={20} color={colors.muted} />
+          </Pressable>
+        </View>
+      )}
+
       {/* Input */}
       <View style={[styles.inputBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+        <Pressable onPress={openPostPicker} style={styles.attachBtn}>
+          <MaterialCommunityIcons name="image-plus" size={24} color={colors.brandDeep} />
+        </Pressable>
         <TextInput
           style={styles.input}
           value={text}
@@ -246,6 +291,45 @@ export default function ChatScreen() {
           />
         </Pressable>
       </View>
+
+      {/* Post picker modal */}
+      <Modal visible={showPostPicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Attach a Post</Text>
+              <Pressable onPress={() => setShowPostPicker(false)} hitSlop={8}>
+                <MaterialCommunityIcons name="close" size={24} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            {myPosts.length === 0 ? (
+              <View style={styles.emptyPosts}>
+                <Text style={styles.emptyText}>No posts yet</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={styles.postsGrid}>
+                {myPosts.map((post) => (
+                  <Pressable
+                    key={post.id}
+                    style={styles.postGridItem}
+                    onPress={() => {
+                      setSelectedPost(post);
+                      setShowPostPicker(false);
+                    }}
+                  >
+                    {post.media?.[0] && (
+                      <Image
+                        source={{ uri: mediaUrl(post.media[0].url) }}
+                        style={styles.postGridImg}
+                      />
+                    )}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -335,5 +419,86 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: {
     backgroundColor: colors.surfaceTertiary,
+  },
+  attachBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectedPostBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  selectedPostContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  selectedPostThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+  },
+  selectedPostText: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: colors.onSurface,
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    maxHeight: "70%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    fontFamily: font.bold,
+    fontSize: 18,
+    color: colors.onSurface,
+  },
+  emptyPosts: {
+    padding: spacing.xl,
+    alignItems: "center",
+  },
+  emptyText: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    color: colors.muted,
+  },
+  postsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: spacing.sm,
+  },
+  postGridItem: {
+    width: "33.33%",
+    aspectRatio: 1,
+    padding: 2,
+  },
+  postGridImg: {
+    width: "100%",
+    height: "100%",
+    borderRadius: radius.sm,
   },
 });
