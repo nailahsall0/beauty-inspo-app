@@ -32,6 +32,9 @@ export default function PostDetail() {
   const [addingDetails, setAddingDetails] = useState(false);
   const [saveSheet, setSaveSheet] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showShareToPro, setShowShareToPro] = useState(false);
+  const [pros, setPros] = useState<any[]>([]);
+  const [loadingPros, setLoadingPros] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -128,6 +131,62 @@ export default function PostDetail() {
       await apiFetch("/reports", { method: "POST", body: { target_type: "post", target_id: post.id, reason: "Inappropriate content" } });
       toast.show("Reported. Thank you.", "success");
     } catch {}
+  };
+
+  const openShareToPro = async () => {
+    setShowShareToPro(true);
+    if (pros.length === 0) {
+      setLoadingPros(true);
+      try {
+        // Get professionals from existing conversations and nearby
+        const [convos, nearby] = await Promise.all([
+          apiFetch<any[]>("/conversations").catch(() => []),
+          apiFetch<any[]>("/professionals/search?limit=10").catch(() => []),
+        ]);
+
+        // Extract professionals from conversations
+        const convoPros = convos
+          .filter((c) => c.professional)
+          .map((c) => ({ ...c.professional, from_conversation: true, conversation_id: c.id }));
+
+        // Combine and dedupe
+        const allPros = [...convoPros];
+        for (const p of nearby) {
+          if (!allPros.find((x) => x.id === p.id)) {
+            allPros.push(p);
+          }
+        }
+        setPros(allPros);
+      } catch (e) {
+        console.error("Failed to load pros:", e);
+      } finally {
+        setLoadingPros(false);
+      }
+    }
+  };
+
+  const sendToPro = async (pro: any) => {
+    try {
+      // If we have an existing conversation, send message there
+      if (pro.conversation_id) {
+        await apiFetch(`/conversations/${pro.conversation_id}/messages`, {
+          method: "POST",
+          body: { text: "Check out this look!", post_id: post?.id },
+        });
+        setShowShareToPro(false);
+        router.push(`/messages/${pro.conversation_id}`);
+      } else {
+        // Start new conversation
+        const result = await apiFetch<{ conversation_id: string }>("/conversations", {
+          method: "POST",
+          body: { professional_id: pro.id, text: "Check out this look!", post_id: post?.id },
+        });
+        setShowShareToPro(false);
+        router.push(`/messages/${result.conversation_id}`);
+      }
+    } catch (e: any) {
+      toast.show(e.message || "Failed to send", "error");
+    }
   };
 
   return (
@@ -263,6 +322,9 @@ export default function PostDetail() {
             <Pressable testID="post-save-to" onPress={() => setSaveSheet(true)} style={styles.actionBtn}>
               <MaterialCommunityIcons name="folder-plus-outline" size={22} color={colors.onSurface} />
             </Pressable>
+            <Pressable testID="post-send-to-pro" onPress={openShareToPro} style={styles.actionBtn}>
+              <MaterialCommunityIcons name="send-outline" size={22} color={colors.onSurface} />
+            </Pressable>
           </View>
 
           {/* Comments */}
@@ -326,6 +388,49 @@ export default function PostDetail() {
           <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
             <Btn label="Cancel" variant="outline" onPress={() => setConfirmDelete(false)} style={{ flex: 1, height: 46 }} />
             <Btn testID="delete-confirm-btn" label="Delete" variant="dark" onPress={doDelete} style={{ flex: 1, height: 46 }} />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Send to Pro Modal */}
+      <Modal visible={showShareToPro} transparent animationType="slide" onRequestClose={() => setShowShareToPro(false)}>
+        <View style={styles.shareModalOverlay}>
+          <View style={[styles.shareModalContent, { paddingBottom: insets.bottom }]}>
+            <View style={styles.shareModalHeader}>
+              <Text style={styles.shareModalTitle}>Send to a Professional</Text>
+              <Pressable onPress={() => setShowShareToPro(false)} hitSlop={8}>
+                <MaterialCommunityIcons name="close" size={24} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            {loadingPros ? (
+              <View style={styles.shareModalLoading}>
+                <Loading />
+              </View>
+            ) : pros.length === 0 ? (
+              <View style={styles.shareModalEmpty}>
+                <MaterialCommunityIcons name="account-search" size={48} color={colors.muted} />
+                <Text style={styles.shareModalEmptyText}>No professionals found</Text>
+                <Text style={styles.shareModalEmptySub}>Find a professional from your Nearby feed</Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.shareModalList}>
+                {pros.map((pro) => (
+                  <Pressable key={pro.id} style={styles.proRow} onPress={() => sendToPro(pro)}>
+                    <Avatar uri={pro.avatar_url} name={pro.business_name || pro.display_name} size={48} />
+                    <View style={styles.proRowInfo}>
+                      <Text style={styles.proRowName}>{pro.business_name || pro.display_name}</Text>
+                      <Text style={styles.proRowSub}>@{pro.username}</Text>
+                    </View>
+                    {pro.from_conversation && (
+                      <View style={styles.recentBadge}>
+                        <Text style={styles.recentBadgeText}>Recent</Text>
+                      </View>
+                    )}
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.muted} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -396,4 +501,19 @@ const styles = StyleSheet.create({
   confirmCard: { position: "absolute", left: spacing.lg, right: spacing.lg, top: "40%", backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.xl },
   confirmTitle: { fontFamily: font.displaySemi, fontSize: 22, color: colors.onSurface, marginBottom: spacing.xs },
   confirmSub: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, color: colors.muted },
+  shareModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  shareModalContent: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "70%" },
+  shareModalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  shareModalTitle: { fontFamily: font.bold, fontSize: 18, color: colors.onSurface },
+  shareModalLoading: { padding: spacing.xl, alignItems: "center" },
+  shareModalEmpty: { padding: spacing.xl, alignItems: "center", gap: spacing.sm },
+  shareModalEmptyText: { fontFamily: font.semibold, fontSize: 16, color: colors.onSurface },
+  shareModalEmptySub: { fontFamily: font.regular, fontSize: 14, color: colors.muted, textAlign: "center" },
+  shareModalList: { padding: spacing.md },
+  proRow: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.lg, marginBottom: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  proRowInfo: { flex: 1, marginLeft: spacing.md },
+  proRowName: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
+  proRowSub: { fontFamily: font.regular, fontSize: 13, color: colors.muted },
+  recentBadge: { backgroundColor: colors.brandTertiary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2, marginRight: spacing.sm },
+  recentBadgeText: { fontFamily: font.semibold, fontSize: 11, color: colors.brandDeep },
 });
