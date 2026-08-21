@@ -201,7 +201,7 @@ export default function PostDetail() {
           style={{ width, aspectRatio: 0.85, backgroundColor: colors.surfaceTertiary }}
           onPress={() => !isVideo && setShowImageViewer(true)}
         >
-          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="contain" transition={200} />)}
+          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
           <View style={[styles.heroBar, { top: insets.top + spacing.sm }]}>
             <IconBtn icon="chevron-left" onPress={() => router.back()} bg="rgba(253,251,247,0.9)" />
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
