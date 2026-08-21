@@ -7,6 +7,8 @@ import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from "react-native-reanimated";
 import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
@@ -35,6 +37,7 @@ export default function PostDetail() {
   const [showShareToPro, setShowShareToPro] = useState(false);
   const [pros, setPros] = useState<any[]>([]);
   const [loadingPros, setLoadingPros] = useState(false);
+  const [showImageViewer, setShowImageViewer] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -194,8 +197,11 @@ export default function PostDetail() {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
         {/* Hero */}
-        <View style={{ width, aspectRatio: 0.85, backgroundColor: colors.surfaceTertiary }}>
-          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
+        <Pressable
+          style={{ width, aspectRatio: 0.85, backgroundColor: colors.surfaceTertiary }}
+          onPress={() => !isVideo && setShowImageViewer(true)}
+        >
+          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="contain" transition={200} />)}
           <View style={[styles.heroBar, { top: insets.top + spacing.sm }]}>
             <IconBtn icon="chevron-left" onPress={() => router.back()} bg="rgba(253,251,247,0.9)" />
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
@@ -210,7 +216,7 @@ export default function PostDetail() {
               )}
             </View>
           </View>
-        </View>
+        </Pressable>
 
         <View style={styles.body}>
           {/* Author */}
@@ -435,7 +441,134 @@ export default function PostDetail() {
           </View>
         </View>
       </Modal>
+
+      {/* Full-screen Image Viewer with Zoom/Pan */}
+      <Modal visible={showImageViewer} transparent animationType="fade" onRequestClose={() => setShowImageViewer(false)}>
+        <ZoomableImage
+          uri={mediaUrl(media?.url)}
+          onClose={() => setShowImageViewer(false)}
+        />
+      </Modal>
     </View>
+  );
+}
+
+function ZoomableImage({ uri, onClose }: { uri?: string; onClose: () => void }) {
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const pinchGesture = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (scale.value < 1) {
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else if (scale.value > 4) {
+        scale.value = withSpring(4);
+        savedScale.value = 4;
+      } else {
+        savedScale.value = scale.value;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      if (scale.value > 1) {
+        translateX.value = savedTranslateX.value + e.translationX;
+        translateY.value = savedTranslateY.value + e.translationY;
+      }
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        scale.value = withSpring(2.5);
+        savedScale.value = 2.5;
+      }
+    });
+
+  const singleTapGesture = Gesture.Tap()
+    .onEnd(() => {
+      runOnJS(onClose)();
+    });
+
+  const composedGesture = Gesture.Simultaneous(
+    pinchGesture,
+    panGesture,
+    Gesture.Exclusive(doubleTapGesture, singleTapGesture)
+  );
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: "black" }}>
+      <GestureDetector gesture={composedGesture}>
+        <Animated.View style={[{ flex: 1, justifyContent: "center", alignItems: "center" }, animatedStyle]}>
+          <Image
+            source={{ uri }}
+            style={{ width: screenW, height: screenH }}
+            contentFit="contain"
+          />
+        </Animated.View>
+      </GestureDetector>
+      <Pressable
+        style={{
+          position: "absolute",
+          top: insets.top + spacing.md,
+          right: spacing.lg,
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: "rgba(0,0,0,0.5)",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        onPress={onClose}
+      >
+        <MaterialCommunityIcons name="close" size={24} color="white" />
+      </Pressable>
+      <Text style={{
+        position: "absolute",
+        bottom: insets.bottom + spacing.lg,
+        alignSelf: "center",
+        color: "rgba(255,255,255,0.6)",
+        fontFamily: font.regular,
+        fontSize: 12,
+      }}>
+        Pinch to zoom · Double-tap to toggle · Tap to close
+      </Text>
+    </GestureHandlerRootView>
   );
 }
 
