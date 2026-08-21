@@ -9,6 +9,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from "react-native-reanimated";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system";
 import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
@@ -453,9 +455,44 @@ export default function PostDetail() {
   );
 }
 
-function ZoomableImage({ uri, onClose }: { uri?: string; onClose: () => void }) {
+function ZoomableImage({ uri, onClose, onDownload }: { uri?: string; onClose: () => void; onDownload?: () => void }) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    if (!uri || downloading) return;
+
+    try {
+      setDownloading(true);
+
+      // Request permission
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        alert("Permission needed to save photos");
+        return;
+      }
+
+      // Download to local file
+      const filename = uri.split("/").pop() || "image.jpg";
+      const localUri = FileSystem.cacheDirectory + filename;
+
+      await FileSystem.downloadAsync(uri, localUri);
+
+      // Save to camera roll
+      await MediaLibrary.saveToLibraryAsync(localUri);
+
+      // Clean up
+      await FileSystem.deleteAsync(localUri, { idempotent: true });
+
+      alert("Saved to camera roll!");
+    } catch (e) {
+      console.error("Download failed:", e);
+      alert("Failed to save image");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -542,22 +579,45 @@ function ZoomableImage({ uri, onClose }: { uri?: string; onClose: () => void }) 
           />
         </Animated.View>
       </GestureDetector>
-      <Pressable
-        style={{
-          position: "absolute",
-          top: insets.top + spacing.md,
-          right: spacing.lg,
-          width: 40,
-          height: 40,
-          borderRadius: 20,
-          backgroundColor: "rgba(0,0,0,0.5)",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-        onPress={onClose}
-      >
-        <MaterialCommunityIcons name="close" size={24} color="white" />
-      </Pressable>
+      <View style={{
+        position: "absolute",
+        top: insets.top + spacing.md,
+        right: spacing.lg,
+        flexDirection: "row",
+        gap: spacing.sm,
+      }}>
+        <Pressable
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onPress={handleDownload}
+          disabled={downloading}
+        >
+          <MaterialCommunityIcons
+            name={downloading ? "loading" : "download"}
+            size={24}
+            color="white"
+          />
+        </Pressable>
+        <Pressable
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onPress={onClose}
+        >
+          <MaterialCommunityIcons name="close" size={24} color="white" />
+        </Pressable>
+      </View>
       <Text style={{
         position: "absolute",
         bottom: insets.bottom + spacing.lg,

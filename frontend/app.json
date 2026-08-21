@@ -13,6 +13,7 @@
       "bundleIdentifier": "com.brookie.app",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Share beauty looks from your photo library",
+        "NSPhotoLibraryAddUsageDescription": "Save looks to your camera roll",
         "NSCameraUsageDescription": "Capture beauty looks to post",
         "NSLocationWhenInUseUsageDescription": "Find beauty professionals near you"
       }
