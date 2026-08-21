@@ -55,6 +55,8 @@
     <string>Find beauty professionals near you</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Save looks to your camera roll</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Share beauty looks from your photo library</string>
     <key>NSUserActivityTypes</key>
