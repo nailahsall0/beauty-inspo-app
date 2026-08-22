@@ -941,16 +941,28 @@ async def unlike_post(post_id: str, user: dict = Depends(get_current_user)):
 
 # ------------------------- Comments -------------------------
 @api.get("/posts/{post_id}/comments")
-async def get_comments(post_id: str):
+async def get_comments(post_id: str, user: dict = Depends(get_optional_user)):
     comments = await db.comments.find({"post_id": post_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
     if not comments:
         return []
     # Batch load authors to avoid N+1 queries
     author_ids = list({c["author_id"] for c in comments})
     authors = {u["id"]: u for u in await db.users.find({"id": {"$in": author_ids}}, {"_id": 0}).to_list(len(author_ids))}
+
+    # Get like counts and user's likes
+    comment_ids = [c["id"] for c in comments]
+    like_counts = {}
+    user_likes = set()
+    async for like in db.comment_likes.find({"comment_id": {"$in": comment_ids}}, {"_id": 0}):
+        like_counts[like["comment_id"]] = like_counts.get(like["comment_id"], 0) + 1
+        if user and like["user_id"] == user["id"]:
+            user_likes.add(like["comment_id"])
+
     for c in comments:
         author = authors.get(c["author_id"])
         c["author"] = public_user(author) if author else None
+        c["like_count"] = like_counts.get(c["id"], 0)
+        c["liked"] = c["id"] in user_likes
     return comments
 
 
@@ -972,7 +984,30 @@ async def add_comment(post_id: str, body: CommentIn, user: dict = Depends(get_cu
         await notify(post["author_id"], "comment", user["id"], f"{user['display_name']} commented on your post", post_id)
     comment.pop("_id", None)
     comment["author"] = public_user(user)
+    comment["like_count"] = 0
+    comment["liked"] = False
     return comment
+
+
+@api.post("/comments/{comment_id}/like")
+async def like_comment(comment_id: str, user: dict = Depends(get_current_user)):
+    comment = await db.comments.find_one({"id": comment_id})
+    if not comment:
+        raise HTTPException(404, "Comment not found")
+    existing = await db.comment_likes.find_one({"comment_id": comment_id, "user_id": user["id"]})
+    if existing:
+        return {"liked": True}
+    await db.comment_likes.insert_one({"comment_id": comment_id, "user_id": user["id"], "created_at": now_iso()})
+    # Notify comment author
+    if comment["author_id"] != user["id"]:
+        await notify(comment["author_id"], "comment_like", user["id"], f"{user['display_name']} liked your comment", comment["post_id"])
+    return {"liked": True}
+
+
+@api.delete("/comments/{comment_id}/like")
+async def unlike_comment(comment_id: str, user: dict = Depends(get_current_user)):
+    await db.comment_likes.delete_one({"comment_id": comment_id, "user_id": user["id"]})
+    return {"liked": False}
 
 
 # ------------------------- Saves & Collections -------------------------

@@ -27,7 +27,7 @@ import { SaveSheet } from "@/src/components/SaveSheet";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
 
-type Comment = { id: string; text: string; parent_id?: string | null; author: any; created_at: string };
+type Comment = { id: string; text: string; parent_id?: string | null; author: any; created_at: string; like_count: number; liked: boolean };
 
 export default function PostDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -48,6 +48,7 @@ export default function PostDetail() {
   const [pros, setPros] = useState<any[]>([]);
   const [loadingPros, setLoadingPros] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,12 +108,31 @@ export default function PostDetail() {
   const sendComment = async () => {
     if (!comment.trim()) return;
     try {
-      const c = await apiFetch<Comment>(`/posts/${post.id}/comments`, { method: "POST", body: { text: comment.trim() } });
+      const body: { text: string; parent_id?: string } = { text: comment.trim() };
+      if (replyingTo) body.parent_id = replyingTo.id;
+      const c = await apiFetch<Comment>(`/posts/${post.id}/comments`, { method: "POST", body });
       setComments((prev) => [...prev, c]);
       setComment("");
+      setReplyingTo(null);
       setPost({ ...post, comment_count: (post as any).comment_count + 1 });
     } catch (e: any) {
       toast.show(e.message || "Failed", "error");
+    }
+  };
+
+  const toggleCommentLike = async (c: Comment) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const liked = !c.liked;
+    setComments((prev) =>
+      prev.map((x) => (x.id === c.id ? { ...x, liked, like_count: x.like_count + (liked ? 1 : -1) } : x))
+    );
+    try {
+      await apiFetch(`/comments/${c.id}/like`, { method: liked ? "POST" : "DELETE" });
+    } catch {
+      // Revert on error
+      setComments((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, liked: !liked, like_count: x.like_count + (liked ? -1 : 1) } : x))
+      );
     }
   };
 
@@ -355,6 +375,16 @@ export default function PostDetail() {
                 <View style={{ flex: 1, marginLeft: spacing.sm }}>
                   <Text style={styles.commentAuthor}>{c.author?.display_name}</Text>
                   <Text style={styles.commentText}>{c.text}</Text>
+                  <View style={styles.commentActions}>
+                    <Pressable onPress={() => toggleCommentLike(c)} style={styles.commentAction}>
+                      <MaterialCommunityIcons name={c.liked ? "heart" : "heart-outline"} size={16} color={c.liked ? colors.pinkDeep : colors.muted} />
+                      {c.like_count > 0 && <Text style={styles.commentActionText}>{c.like_count}</Text>}
+                    </Pressable>
+                    <Pressable onPress={() => setReplyingTo(c)} style={styles.commentAction}>
+                      <MaterialCommunityIcons name="reply" size={16} color={colors.muted} />
+                      <Text style={styles.commentActionText}>Reply</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             ))
@@ -365,12 +395,20 @@ export default function PostDetail() {
       {/* Sticky bottom: comment input + Find Pro */}
       <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+          {replyingTo && (
+            <View style={styles.replyingToBar}>
+              <Text style={styles.replyingToText}>Replying to @{replyingTo.author?.username || replyingTo.author?.display_name}</Text>
+              <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
+                <MaterialCommunityIcons name="close" size={18} color={colors.muted} />
+              </Pressable>
+            </View>
+          )}
           <View style={styles.commentInputRow}>
             <TextInput
               testID="comment-input"
               value={comment}
               onChangeText={setComment}
-              placeholder="Add a comment…"
+              placeholder={replyingTo ? `Reply to ${replyingTo.author?.display_name}…` : "Add a comment…"}
               placeholderTextColor={colors.faint}
               style={styles.commentInput}
             />
@@ -701,6 +739,11 @@ const styles = StyleSheet.create({
   comment: { flexDirection: "row", marginTop: spacing.lg },
   commentAuthor: { fontFamily: font.bold, fontSize: 13, color: colors.onSurface },
   commentText: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, color: colors.onSurfaceSecondary, marginTop: 1 },
+  commentActions: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.xs },
+  commentAction: { flexDirection: "row", alignItems: "center", gap: 4 },
+  commentActionText: { fontFamily: font.medium, fontSize: 12, color: colors.muted },
+  replyingToBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm },
+  replyingToText: { fontFamily: font.medium, fontSize: 13, color: colors.brandDeep },
   bottomBar: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   commentInputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   commentInput: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill, paddingHorizontal: spacing.lg, height: 44, fontFamily: font.medium, fontSize: 14, color: colors.onSurface },
