@@ -12,10 +12,10 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 
 
 // Dynamically import to handle Expo Go (which lacks native modules)
 let MediaLibrary: typeof import("expo-media-library") | null = null;
-let FileSystem: typeof import("expo-file-system") | null = null;
+let FileSystem: typeof import("expo-file-system/legacy") | null = null;
 try {
   MediaLibrary = require("expo-media-library");
-  FileSystem = require("expo-file-system");
+  FileSystem = require("expo-file-system/legacy");
 } catch (e) {
   console.log("Media library not available (Expo Go)");
 }
