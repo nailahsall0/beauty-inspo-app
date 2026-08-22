@@ -9,8 +9,16 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from "react-native-reanimated";
-import * as MediaLibrary from "expo-media-library";
-import * as FileSystem from "expo-file-system";
+
+// Dynamically import to handle Expo Go (which lacks native modules)
+let MediaLibrary: typeof import("expo-media-library") | null = null;
+let FileSystem: typeof import("expo-file-system") | null = null;
+try {
+  MediaLibrary = require("expo-media-library");
+  FileSystem = require("expo-file-system");
+} catch (e) {
+  console.log("Media library not available (Expo Go)");
+}
 import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
@@ -462,6 +470,12 @@ function ZoomableImage({ uri, onClose, onDownload }: { uri?: string; onClose: ()
 
   const handleDownload = async () => {
     if (!uri || downloading) return;
+
+    // Check if native modules are available
+    if (!MediaLibrary || !FileSystem) {
+      alert("Download not available in Expo Go. Use a development build.");
+      return;
+    }
 
     try {
       setDownloading(true);
