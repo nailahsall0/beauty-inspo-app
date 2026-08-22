@@ -525,8 +525,14 @@ function ZoomableImage({ uri, onClose, onDownload }: { uri?: string; onClose: ()
         return;
       }
 
-      // Download to local file
-      const filename = uri.split("/").pop() || "image.jpg";
+      // Download to local file - ensure proper filename with extension
+      let filename = uri.split("/").pop() || "image";
+      // Remove query parameters
+      filename = filename.split("?")[0];
+      // Ensure it has an image extension
+      if (!filename.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        filename = `${filename}.jpg`;
+      }
       const localUri = FileSystem.cacheDirectory + filename;
 
       await FileSystem.downloadAsync(uri, localUri);
