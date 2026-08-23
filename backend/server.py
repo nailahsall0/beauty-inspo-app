@@ -1768,8 +1768,9 @@ class SendMessageBody(BaseModel):
 
 
 class StartConversationBody(BaseModel):
-    professional_id: str
-    text: str = Field(..., min_length=1, max_length=2000)
+    professional_id: Optional[str] = None
+    user_id: Optional[str] = None  # For user-to-user messaging
+    text: Optional[str] = Field(None, max_length=2000)
     post_id: Optional[str] = None
 
 
@@ -1809,84 +1810,107 @@ async def list_conversations(user: dict = Depends(get_current_user)):
 
 @api.post("/conversations")
 async def start_conversation(body: StartConversationBody, user: dict = Depends(get_current_user)):
-    """Start a new conversation with a professional."""
-    # Get the professional
-    pro = await db.professional_profiles.find_one({"id": body.professional_id}, {"_id": 0})
-    if not pro:
-        raise HTTPException(404, "Professional not found")
+    """Start a new conversation with a professional or user."""
+    if not body.professional_id and not body.user_id:
+        raise HTTPException(400, "Either professional_id or user_id is required")
 
-    pro_user_id = pro["user_id"]
+    recipient_id = None
+    professional_id = None
+
+    if body.professional_id:
+        # Messaging a professional
+        pro = await db.professional_profiles.find_one({"id": body.professional_id}, {"_id": 0})
+        if not pro:
+            raise HTTPException(404, "Professional not found")
+        recipient_id = pro["user_id"]
+        professional_id = body.professional_id
+    else:
+        # Messaging a regular user
+        other_user = await db.users.find_one({"id": body.user_id}, {"_id": 0})
+        if not other_user:
+            raise HTTPException(404, "User not found")
+        recipient_id = body.user_id
+
+    # Can't message yourself
+    if recipient_id == user["id"]:
+        raise HTTPException(400, "Cannot message yourself")
 
     # Check if conversation already exists
-    existing = await db.conversations.find_one({
-        "participants": {"$all": [user["id"], pro_user_id]},
-        "professional_id": body.professional_id
-    })
+    query = {"participants": {"$all": [user["id"], recipient_id]}}
+    if professional_id:
+        query["professional_id"] = professional_id
+    else:
+        query["professional_id"] = {"$exists": False}
+
+    existing = await db.conversations.find_one(query)
 
     if existing:
-        # Add message to existing conversation
         conv_id = existing["id"]
     else:
         # Create new conversation
         conv_id = new_id()
-        await db.conversations.insert_one({
+        conv_doc = {
             "id": conv_id,
-            "participants": [user["id"], pro_user_id],
-            "professional_id": body.professional_id,
+            "participants": [user["id"], recipient_id],
             "created_at": now_iso(),
             "last_message_at": now_iso()
+        }
+        if professional_id:
+            conv_doc["professional_id"] = professional_id
+        await db.conversations.insert_one(conv_doc)
+
+    # Create the message if text provided
+    msg = None
+    if body.text:
+        msg_id = new_id()
+        msg = {
+            "id": msg_id,
+            "conversation_id": conv_id,
+            "sender_id": user["id"],
+            "text": body.text,
+            "post_id": body.post_id,
+            "read": False,
+            "created_at": now_iso()
+        }
+        await db.messages.insert_one(msg)
+        msg.pop("_id", None)
+
+        # Update conversation last_message_at
+        await db.conversations.update_one(
+            {"id": conv_id},
+            {"$set": {"last_message_at": now_iso()}}
+        )
+
+        # Enrich message with post info if tagged
+        if body.post_id:
+            post = await db.posts.find_one({"id": body.post_id}, {"_id": 0})
+            msg["post"] = post
+
+        # Add sender info
+        msg["sender"] = {
+            "id": user["id"],
+            "username": user.get("username"),
+            "display_name": user.get("display_name"),
+            "avatar_url": user.get("avatar_url")
+        }
+
+        # Send real-time update to recipient
+        await ws_manager.send_to_user(recipient_id, {
+            "type": "new_message",
+            "conversation_id": conv_id,
+            "message": msg
         })
 
-    # Create the message
-    msg_id = new_id()
-    msg = {
-        "id": msg_id,
-        "conversation_id": conv_id,
-        "sender_id": user["id"],
-        "text": body.text,
-        "post_id": body.post_id,
-        "read": False,
-        "created_at": now_iso()
-    }
-    await db.messages.insert_one(msg)
-    msg.pop("_id", None)  # Remove MongoDB ObjectId before returning
-
-    # Update conversation last_message_at
-    await db.conversations.update_one(
-        {"id": conv_id},
-        {"$set": {"last_message_at": now_iso()}}
-    )
-
-    # Enrich message with post info if tagged
-    if body.post_id:
-        post = await db.posts.find_one({"id": body.post_id}, {"_id": 0})
-        msg["post"] = post
-
-    # Add sender info
-    msg["sender"] = {
-        "id": user["id"],
-        "username": user.get("username"),
-        "display_name": user.get("display_name"),
-        "avatar_url": user.get("avatar_url")
-    }
-
-    # Send real-time update to recipient
-    await ws_manager.send_to_user(pro_user_id, {
-        "type": "new_message",
-        "conversation_id": conv_id,
-        "message": msg
-    })
-
-    # Send push notification
-    pro_user = await db.users.find_one({"id": pro_user_id}, {"_id": 0})
-    if pro_user and pro_user.get("push_token"):
-        sender_name = user.get("display_name") or user.get("username") or "Someone"
-        await send_push_notification(
-            pro_user["push_token"],
-            f"Message from {sender_name}",
-            body.text[:100],
-            {"conversation_id": conv_id}
-        )
+        # Send push notification
+        recipient_user = await db.users.find_one({"id": recipient_id}, {"_id": 0})
+        if recipient_user and recipient_user.get("push_token"):
+            sender_name = user.get("display_name") or user.get("username") or "Someone"
+            await send_push_notification(
+                recipient_user["push_token"],
+                f"Message from {sender_name}",
+                body.text[:100],
+                {"conversation_id": conv_id}
+            )
 
     return {"conversation_id": conv_id, "message": msg}
 
