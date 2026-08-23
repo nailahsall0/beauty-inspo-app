@@ -1,16 +1,19 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
-  View, Text, StyleSheet, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, Modal, ScrollView
+  View, Text, StyleSheet, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, Modal, ScrollView, ActionSheetIOS, Alert
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "expo-image";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors, spacing, radius, font } from "@/src/theme/tokens";
+import { spacing, radius, font } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl, API, TOKEN_KEY } from "@/src/lib/api";
 import { storage } from "@/src/utils/storage";
 import { Loading } from "@/src/components/ui";
 import { useAuth } from "@/src/context/AuthContext";
+import { useTheme } from "@/src/hooks/useTheme";
+import { format, formatDistanceToNow } from "date-fns";
+import * as Clipboard from "expo-clipboard";
 
 type Message = {
   id: string;
@@ -27,6 +30,7 @@ export default function ChatScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { colors } = useTheme();
   const flatListRef = useRef<FlatList>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -73,9 +77,10 @@ export default function ChatScreen() {
           const mePro = convo.professional && convo.professional.id === user?.professional_id;
           setIAmThePro(mePro);
 
-          // If they're a professional, include their business name
+          // If they're a professional, include their business name and professional_id
           if (otherPro) {
             other.business_name = convo.professional.business_name;
+            other.professional_id = convo.professional.id;
           }
           setOtherUser(other);
         }
@@ -186,39 +191,94 @@ export default function ChatScreen() {
     }
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  const handleMessageLongPress = (message: Message) => {
+    const copyText = async () => {
+      await Clipboard.setStringAsync(message.text);
+    };
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ["Copy Message", "Cancel"], cancelButtonIndex: 1 },
+        async (buttonIndex) => {
+          if (buttonIndex === 0) {
+            await copyText();
+          }
+        }
+      );
+    } else {
+      Alert.alert("Message", message.text, [
+        { text: "Copy", onPress: copyText },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    }
+  };
+
+  const formatMessageTime = (dateString: string) => {
+    try {
+      return formatDistanceToNow(new Date(dateString), { addSuffix: true });
+    } catch {
+      return "";
+    }
+  };
+
+  const formatShortTime = (dateString: string) => {
+    try {
+      return format(new Date(dateString), "h:mm a");
+    } catch {
+      return "";
+    }
+  };
+
+  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const isMe = item.sender_id === user?.id;
+    const prevMessage = index > 0 ? messages[index - 1] : null;
+    const showTimestamp = !prevMessage ||
+      (new Date(item.created_at).getTime() - new Date(prevMessage.created_at).getTime() > 5 * 60 * 1000); // Show timestamp if > 5 min gap
 
     return (
-      <View style={[styles.msgRow, isMe && styles.msgRowMe]}>
-        {!isMe && (
-          <View style={styles.msgAvatar}>
-            {item.sender?.avatar_url ? (
-              <Image source={{ uri: mediaUrl(item.sender.avatar_url) }} style={styles.msgAvatarImg} />
-            ) : (
-              <MaterialCommunityIcons name="account" size={16} color={colors.muted} />
-            )}
-          </View>
+      <View>
+        {showTimestamp && (
+          <Text style={[styles.timestamp, { color: colors.muted }]}>
+            {formatMessageTime(item.created_at)}
+          </Text>
         )}
-        <View style={[styles.msgBubble, isMe ? styles.msgBubbleMe : styles.msgBubbleOther]}>
-          {item.post && (
-            <Pressable
-              style={styles.postAttachment}
-              onPress={() => router.push(`/post/${item.post.id}`)}
-            >
-              {item.post.media?.[0] && (
-                <Image
-                  source={{ uri: mediaUrl(item.post.media[0].url) }}
-                  style={styles.postThumb}
-                />
+        <Pressable
+          style={[styles.msgRow, isMe && styles.msgRowMe]}
+          onLongPress={() => handleMessageLongPress(item)}
+          delayLongPress={300}
+        >
+          {!isMe && (
+            <View style={[styles.msgAvatar, { backgroundColor: colors.surfaceTertiary }]}>
+              {item.sender?.avatar_url ? (
+                <Image source={{ uri: mediaUrl(item.sender.avatar_url) }} style={styles.msgAvatarImg} />
+              ) : (
+                <MaterialCommunityIcons name="account" size={16} color={colors.muted} />
               )}
-              <Text style={styles.postCaption} numberOfLines={1}>
-                {item.post.caption || "View post"}
-              </Text>
-            </Pressable>
+            </View>
           )}
-          <Text style={[styles.msgText, isMe && styles.msgTextMe]}>{item.text}</Text>
-        </View>
+          <View style={styles.msgContent}>
+            <View style={[styles.msgBubble, isMe ? [styles.msgBubbleMe, { backgroundColor: colors.brandDeep }] : [styles.msgBubbleOther, { backgroundColor: colors.surfaceSecondary }]]}>
+              {item.post && (
+                <Pressable
+                  style={styles.postAttachment}
+                  onPress={() => router.push(`/post/${item.post.id}`)}
+                >
+                  {item.post.media?.[0] && (
+                    <Image
+                      source={{ uri: mediaUrl(item.post.media[0].url) }}
+                      style={styles.postThumb}
+                    />
+                  )}
+                  <Text style={[styles.postCaption, { color: colors.onSurface }]} numberOfLines={1}>
+                    {item.post.caption || "View post"}
+                  </Text>
+                </Pressable>
+              )}
+              <Text style={[styles.msgText, { color: colors.onSurface }, isMe && { color: "#FFFFFF" }]}>{item.text}</Text>
+            </View>
+            <Text style={[styles.msgTime, { color: colors.muted }, isMe && styles.msgTimeMe]}>{formatShortTime(item.created_at)}</Text>
+          </View>
+        </Pressable>
       </View>
     );
   };
@@ -227,33 +287,43 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: insets.top }]}
+      style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.surface }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onSurface} />
         </Pressable>
-        <View style={styles.headerCenter}>
+        <Pressable
+          style={styles.headerCenter}
+          onPress={() => {
+            if (otherUser?.professional_id) {
+              router.push(`/professional/${otherUser.professional_id}`);
+            } else if (otherUser?.id) {
+              router.push(`/user/${otherUser.id}`);
+            }
+          }}
+        >
           <View style={styles.headerNameRow}>
-            <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
+            <Text style={[styles.headerName, { color: colors.onSurface }]} numberOfLines={1}>{displayName}</Text>
             {otherIsPro && (
-              <View style={styles.proBadge}>
-                <Text style={styles.proBadgeText}>PRO</Text>
+              <View style={[styles.proBadge, { backgroundColor: colors.brandTertiary }]}>
+                <Text style={[styles.proBadgeText, { color: colors.brandDeep }]}>PRO</Text>
               </View>
             )}
+            <MaterialCommunityIcons name="chevron-right" size={18} color={colors.muted} />
           </View>
           <View style={styles.headerSubRow}>
             {otherUser?.username && (
-              <Text style={styles.headerUsername}>@{otherUser.username}</Text>
+              <Text style={[styles.headerUsername, { color: colors.muted }]}>@{otherUser.username}</Text>
             )}
             {iAmThePro && (
-              <Text style={styles.headerContext}> · Messaging your Pro account</Text>
+              <Text style={[styles.headerContext, { color: colors.brandDeep }]}> · Messaging your Pro account</Text>
             )}
           </View>
-        </View>
+        </Pressable>
         <View style={{ width: 24 }} />
       </View>
 
@@ -275,7 +345,7 @@ export default function ChatScreen() {
 
       {/* Selected post preview */}
       {selectedPost && (
-        <View style={styles.selectedPostBar}>
+        <View style={[styles.selectedPostBar, { borderTopColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
           <View style={styles.selectedPostContent}>
             {selectedPost.media?.[0] && (
               <Image
@@ -283,7 +353,7 @@ export default function ChatScreen() {
                 style={styles.selectedPostThumb}
               />
             )}
-            <Text style={styles.selectedPostText} numberOfLines={1}>
+            <Text style={[styles.selectedPostText, { color: colors.onSurface }]} numberOfLines={1}>
               {selectedPost.caption || "Post attached"}
             </Text>
           </View>
@@ -294,12 +364,12 @@ export default function ChatScreen() {
       )}
 
       {/* Input */}
-      <View style={[styles.inputBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+      <View style={[styles.inputBar, { paddingBottom: insets.bottom + spacing.sm, borderTopColor: colors.border }]}>
         <Pressable onPress={openPostPicker} style={styles.attachBtn}>
           <MaterialCommunityIcons name="image-plus" size={24} color={colors.brandDeep} />
         </Pressable>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface }]}
           value={text}
           onChangeText={setText}
           placeholder="Type a message..."
@@ -311,12 +381,12 @@ export default function ChatScreen() {
           testID="send-message"
           onPress={sendMessage}
           disabled={!text.trim() || sending}
-          style={[styles.sendBtn, (!text.trim() || sending) && styles.sendBtnDisabled]}
+          style={[styles.sendBtn, { backgroundColor: colors.brandDeep }, (!text.trim() || sending) && { backgroundColor: colors.surfaceTertiary }]}
         >
           <MaterialCommunityIcons
             name="send"
             size={22}
-            color={text.trim() && !sending ? colors.white : colors.muted}
+            color={text.trim() && !sending ? "#FFFFFF" : colors.muted}
           />
         </Pressable>
       </View>
@@ -324,16 +394,16 @@ export default function ChatScreen() {
       {/* Post picker modal */}
       <Modal visible={showPostPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Attach a Post</Text>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom, backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.onSurface }]}>Attach a Post</Text>
               <Pressable onPress={() => setShowPostPicker(false)} hitSlop={8}>
                 <MaterialCommunityIcons name="close" size={24} color={colors.onSurface} />
               </Pressable>
             </View>
             {myPosts.length === 0 ? (
               <View style={styles.emptyPosts}>
-                <Text style={styles.emptyText}>No posts yet</Text>
+                <Text style={[styles.emptyText, { color: colors.muted }]}>No posts yet</Text>
               </View>
             ) : (
               <ScrollView contentContainerStyle={styles.postsGrid}>
@@ -364,33 +434,32 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surface },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
     gap: spacing.md,
   },
   headerCenter: { flex: 1 },
   headerNameRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  headerName: { fontFamily: font.bold, fontSize: 16, color: colors.onSurface },
+  headerName: { fontFamily: font.bold, fontSize: 16 },
   headerSubRow: { flexDirection: "row", alignItems: "center" },
-  headerUsername: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
-  headerContext: { fontFamily: font.medium, fontSize: 11, color: colors.brandDeep },
-  proBadge: { backgroundColor: colors.brandTertiary, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
-  proBadgeText: { fontFamily: font.bold, fontSize: 9, color: colors.brandDeep, letterSpacing: 0.5 },
+  headerUsername: { fontFamily: font.regular, fontSize: 12 },
+  headerContext: { fontFamily: font.medium, fontSize: 11 },
+  proBadge: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  proBadgeText: { fontFamily: font.bold, fontSize: 9, letterSpacing: 0.5 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   messagesList: { padding: spacing.md, gap: spacing.sm },
+  timestamp: { fontFamily: font.regular, fontSize: 11, textAlign: "center", marginVertical: spacing.sm },
   msgRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, maxWidth: "85%" },
   msgRowMe: { alignSelf: "flex-end", flexDirection: "row-reverse" },
   msgAvatar: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.surfaceTertiary,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -403,15 +472,15 @@ const styles = StyleSheet.create({
     maxWidth: "100%",
   },
   msgBubbleMe: {
-    backgroundColor: colors.brandDeep,
     borderBottomRightRadius: 4,
   },
   msgBubbleOther: {
-    backgroundColor: colors.surfaceSecondary,
     borderBottomLeftRadius: 4,
   },
-  msgText: { fontFamily: font.regular, fontSize: 15, color: colors.onSurface },
-  msgTextMe: { color: colors.white },
+  msgContent: { flexShrink: 1 },
+  msgText: { fontFamily: font.regular, fontSize: 15 },
+  msgTime: { fontFamily: font.regular, fontSize: 10, marginTop: 2 },
+  msgTimeMe: { textAlign: "right" },
   postAttachment: {
     flexDirection: "row",
     alignItems: "center",
@@ -422,37 +491,30 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   postThumb: { width: 40, height: 40, borderRadius: radius.sm },
-  postCaption: { fontFamily: font.medium, fontSize: 12, color: colors.onSurface, flex: 1 },
+  postCaption: { fontFamily: font.medium, fontSize: 12, flex: 1 },
   inputBar: {
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
     gap: spacing.sm,
   },
   input: {
     flex: 1,
-    backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontFamily: font.regular,
     fontSize: 15,
-    color: colors.onSurface,
     maxHeight: 100,
   },
   sendBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.brandDeep,
     alignItems: "center",
     justifyContent: "center",
-  },
-  sendBtnDisabled: {
-    backgroundColor: colors.surfaceTertiary,
   },
   attachBtn: {
     width: 40,
@@ -466,8 +528,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
   },
   selectedPostContent: {
     flex: 1,
@@ -483,7 +543,6 @@ const styles = StyleSheet.create({
   selectedPostText: {
     fontFamily: font.medium,
     fontSize: 13,
-    color: colors.onSurface,
     flex: 1,
   },
   modalOverlay: {
@@ -492,7 +551,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     maxHeight: "70%",
@@ -504,12 +562,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontFamily: font.bold,
     fontSize: 18,
-    color: colors.onSurface,
   },
   emptyPosts: {
     padding: spacing.xl,
@@ -518,7 +574,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontFamily: font.regular,
     fontSize: 14,
-    color: colors.muted,
   },
   postsGrid: {
     flexDirection: "row",
