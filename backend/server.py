@@ -38,8 +38,9 @@ db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
-# Default to 24 hours for security (was 30 days). Can be overridden via env var.
-ACCESS_TOKEN_MINUTES = int(os.environ.get('ACCESS_TOKEN_MINUTES', '1440'))
+# Default to 1 year (525600 minutes) for persistent sessions like Instagram.
+# Users stay signed in until they manually sign out, reinstall, or clear data.
+ACCESS_TOKEN_MINUTES = int(os.environ.get('ACCESS_TOKEN_MINUTES', '525600'))
 
 # Upload limits: 50MB default, configurable via env
 MAX_UPLOAD_SIZE = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '50')) * 1024 * 1024
