@@ -5,7 +5,8 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
+import { spacing, radius, font, type } from "@/src/theme/tokens";
+import { useTheme } from "@/src/hooks/useTheme";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading, EmptyState } from "@/src/components/ui";
 import { Post } from "@/src/components/Feed";
@@ -19,6 +20,7 @@ export default function ProfessionalProfile() {
   const { width } = useWindowDimensions();
   const { user } = useAuth();
   const toast = useToast();
+  const { colors } = useTheme();
   const [pro, setPro] = useState<any>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [tab, setTab] = useState<"portfolio" | "services">("portfolio");
@@ -59,12 +61,24 @@ export default function ProfessionalProfile() {
 
   const startMessage = async () => {
     try {
+      // First check if we already have a conversation with this professional
+      const convos = await apiFetch<any[]>("/conversations");
+      const existing = convos.find((c) => c.professional?.id === pro.id);
+      if (existing?.id) {
+        router.push(`/messages/${existing.id}`);
+        return;
+      }
+      // Create new conversation
       const result = await apiFetch<{ conversation_id: string }>("/conversations", {
         method: "POST",
-        body: { professional_id: pro.id, text: "Hi! I'd love to learn more about your services." }
+        body: { professional_id: pro.id }
       });
+      if (!result?.conversation_id) {
+        throw new Error("Failed to create conversation");
+      }
       router.push(`/messages/${result.conversation_id}`);
     } catch (e: any) {
+      console.error("Failed to start conversation:", e);
       toast.show(e.message || "Could not start conversation", "error");
     }
   };
@@ -82,7 +96,7 @@ export default function ProfessionalProfile() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: pro.booking_url ? 120 : spacing.xxl }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: !isOwn ? 120 : spacing.xxl }}>
         {/* Cover */}
         <View style={{ width, height: 190, backgroundColor: colors.surfaceTertiary }}>
           {pro.cover_url ? <Image source={{ uri: mediaUrl(pro.cover_url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" /> : null}
@@ -94,26 +108,26 @@ export default function ProfessionalProfile() {
         </View>
 
         <View style={styles.body}>
-          <View style={styles.avatarWrap}>
+          <View style={[styles.avatarWrap, { borderColor: colors.surface }]}>
             <Avatar uri={pro.avatar_url} name={pro.business_name} size={88} />
           </View>
 
           <View style={styles.nameRow}>
-            <Text style={styles.name}>{pro.business_name}</Text>
+            <Text style={[styles.name, { color: colors.onSurface }]}>{pro.business_name}</Text>
             <VerifiedBadge status={pro.verification_status} size={18} />
           </View>
-          <Text style={styles.handle}>@{pro.username}</Text>
+          <Text style={[styles.handle, { color: colors.muted }]}>@{pro.username}</Text>
           {pro.city ? (
             <View style={styles.locRow}>
               <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.muted} />
-              <Text style={styles.loc}>{[pro.city, pro.state].filter(Boolean).join(", ")} · {pro.service_radius} mi radius</Text>
+              <Text style={[styles.loc, { color: colors.muted }]}>{[pro.city, pro.state].filter(Boolean).join(", ")} · {pro.service_radius} mi radius</Text>
             </View>
           ) : null}
-          {pro.bio ? <Text style={styles.bio}>{pro.bio}</Text> : null}
+          {pro.bio ? <Text style={[styles.bio, { color: colors.onSurfaceSecondary }]}>{pro.bio}</Text> : null}
 
           <View style={styles.statsRow}>
-            <Text style={styles.stat}><Text style={styles.statN}>{pro.post_count}</Text> looks</Text>
-            <Pressable testID="pro-followers" onPress={() => router.push(`/connections/${pro.user_id}?type=followers`)}><Text style={styles.stat}><Text style={styles.statN}>{pro.followers}</Text> followers</Text></Pressable>
+            <Text style={[styles.stat, { color: colors.muted }]}><Text style={[styles.statN, { color: colors.onSurface }]}>{pro.post_count}</Text> looks</Text>
+            <Pressable testID="pro-followers" onPress={() => router.push(`/connections/${pro.user_id}?type=followers`)}><Text style={[styles.stat, { color: colors.muted }]}><Text style={[styles.statN, { color: colors.onSurface }]}>{pro.followers}</Text> followers</Text></Pressable>
           </View>
 
           {/* Social + follow */}
@@ -133,14 +147,14 @@ export default function ProfessionalProfile() {
           </View>
 
           {/* Tabs */}
-          <View style={styles.tabs}>
+          <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
             <Pressable testID="pro-tab-portfolio" onPress={() => setTab("portfolio")} style={styles.tab}>
-              <Text style={[styles.tabText, tab === "portfolio" && styles.tabActive]}>Portfolio</Text>
-              {tab === "portfolio" && <View style={styles.underline} />}
+              <Text style={[styles.tabText, { color: colors.faint }, tab === "portfolio" && { color: colors.onSurface }]}>Portfolio</Text>
+              {tab === "portfolio" && <View style={[styles.underline, { backgroundColor: colors.brandDeep }]} />}
             </Pressable>
             <Pressable testID="pro-tab-services" onPress={() => setTab("services")} style={styles.tab}>
-              <Text style={[styles.tabText, tab === "services" && styles.tabActive]}>Services & Pricing</Text>
-              {tab === "services" && <View style={styles.underline} />}
+              <Text style={[styles.tabText, { color: colors.faint }, tab === "services" && { color: colors.onSurface }]}>Services & Pricing</Text>
+              {tab === "services" && <View style={[styles.underline, { backgroundColor: colors.brandDeep }]} />}
             </Pressable>
           </View>
 
@@ -173,12 +187,12 @@ export default function ProfessionalProfile() {
               )}
               {pro.services?.length ? (
                 pro.services.map((s: any) => (
-                  <View key={s.id} style={styles.serviceRow}>
+                  <View key={s.id} style={[styles.serviceRow, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.serviceName}>{s.name}</Text>
-                      {s.duration ? <Text style={styles.serviceDur}>{s.duration}{s.description ? ` · ${s.description}` : ""}</Text> : null}
+                      <Text style={[styles.serviceName, { color: colors.onSurface }]}>{s.name}</Text>
+                      {s.duration ? <Text style={[styles.serviceDur, { color: colors.muted }]}>{s.duration}{s.description ? ` · ${s.description}` : ""}</Text> : null}
                     </View>
-                    {s.price != null && <Text style={styles.servicePrice}>Starting at ${s.price}</Text>}
+                    {s.price != null && <Text style={[styles.servicePrice, { color: colors.brandDeep }]}>Starting at ${s.price}</Text>}
                   </View>
                 ))
               ) : (
@@ -189,9 +203,13 @@ export default function ProfessionalProfile() {
         </View>
       </ScrollView>
 
-      {pro.booking_url && !isOwn && (
-        <View style={[styles.bookBar, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Btn testID="book-appointment" label="Book Appointment" icon="calendar-check-outline" onPress={openBooking} style={{ height: 52 }} />
+      {!isOwn && (
+        <View style={[styles.bookBar, { paddingBottom: insets.bottom + spacing.sm, backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+          {pro.booking_url ? (
+            <Btn testID="book-appointment" label="Book Appointment" icon="calendar-check-outline" onPress={openBooking} style={{ height: 52 }} />
+          ) : (
+            <Btn testID="message-for-booking" label="Message for Booking Info" icon="message-outline" variant="secondary" onPress={startMessage} style={{ height: 52 }} />
+          )}
         </View>
       )}
     </View>
@@ -202,26 +220,25 @@ const styles = StyleSheet.create({
   coverScrim: { position: "absolute", top: 0, left: 0, right: 0, height: 90 },
   coverBar: { position: "absolute", left: spacing.lg, right: spacing.lg, flexDirection: "row", justifyContent: "space-between" },
   body: { paddingHorizontal: spacing.lg },
-  avatarWrap: { marginTop: -44, borderWidth: 4, borderColor: colors.surface, borderRadius: 50, alignSelf: "flex-start" },
+  avatarWrap: { marginTop: -44, borderWidth: 4, borderRadius: 50, alignSelf: "flex-start" },
   nameRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.md },
-  name: { fontFamily: font.displaySemi, fontSize: 26, color: colors.onSurface },
-  handle: { fontFamily: font.medium, fontSize: 14, color: colors.muted, marginTop: 1 },
+  name: { fontFamily: font.displaySemi, fontSize: 26 },
+  handle: { fontFamily: font.medium, fontSize: 14, marginTop: 1 },
   locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.sm },
-  loc: { fontFamily: font.medium, fontSize: 13, color: colors.muted },
-  bio: { fontFamily: font.regular, fontSize: 14, lineHeight: 21, color: colors.onSurfaceSecondary, marginTop: spacing.md },
+  loc: { fontFamily: font.medium, fontSize: 13 },
+  bio: { fontFamily: font.regular, fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   statsRow: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.md },
-  stat: { fontFamily: font.regular, fontSize: 13, color: colors.muted },
-  statN: { fontFamily: font.bold, fontSize: 14, color: colors.onSurface },
+  stat: { fontFamily: font.regular, fontSize: 13 },
+  statN: { fontFamily: font.bold, fontSize: 14 },
   actionsRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.lg },
-  tabs: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.xl, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tabs: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.xl, borderBottomWidth: 1 },
   tab: { alignItems: "center", paddingBottom: spacing.md },
-  tabText: { fontFamily: font.semibold, fontSize: 15, color: colors.faint },
-  tabActive: { color: colors.onSurface },
-  underline: { height: 2.5, width: 22, backgroundColor: colors.brandDeep, borderRadius: 2, marginTop: 8, position: "absolute", bottom: -1 },
+  tabText: { fontFamily: font.semibold, fontSize: 15 },
+  underline: { height: 2.5, width: 22, borderRadius: 2, marginTop: 8, position: "absolute", bottom: -1 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.lg },
-  serviceRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.border, marginTop: 0 },
-  serviceName: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
-  serviceDur: { fontFamily: font.regular, fontSize: 12.5, color: colors.muted, marginTop: 2 },
-  servicePrice: { fontFamily: font.bold, fontSize: 14, color: colors.brandDeep },
-  bookBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  serviceRow: { flexDirection: "row", alignItems: "center", borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, marginTop: 0 },
+  serviceName: { fontFamily: font.bold, fontSize: 15 },
+  serviceDur: { fontFamily: font.regular, fontSize: 12.5, marginTop: 2 },
+  servicePrice: { fontFamily: font.bold, fontSize: 14 },
+  bookBar: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
 });
