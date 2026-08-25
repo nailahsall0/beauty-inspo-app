@@ -9,6 +9,7 @@ import { useTheme } from "@/src/hooks/useTheme";
 import { apiFetch } from "@/src/lib/api";
 import { Btn, IconBtn, Loading } from "@/src/components/ui";
 import { useToast } from "@/src/components/Toast";
+import { useAuth } from "@/src/context/AuthContext";
 
 type Svc = { id?: string; name: string; price: string; duration: string; category_id?: string };
 
@@ -17,6 +18,7 @@ export default function ProEdit() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { colors } = useTheme();
+  const { refresh } = useAuth();
   const [pro, setPro] = useState<any>(null);
   const [business, setBusiness] = useState("");
   const [username, setUsername] = useState("");
@@ -73,6 +75,7 @@ export default function ProEdit() {
           services: services.filter((s) => s.name.trim()).map((s) => ({ id: s.id, name: s.name.trim(), price: s.price ? parseFloat(s.price) : null, duration: s.duration || null, category_id: s.category_id })),
         },
       });
+      await refresh(); // Update AuthContext with new user data
       toast.show("Profile updated", "success");
       router.back();
     } catch (e: any) { toast.show(e.message || "Failed", "error"); }
