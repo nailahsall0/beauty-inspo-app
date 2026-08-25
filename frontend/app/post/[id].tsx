@@ -725,8 +725,23 @@ function PostVideo({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = false;
-    p.play();
   });
+
+  useEffect(() => {
+    // Play when player becomes ready
+    if (player.status === "readyToPlay") {
+      player.play();
+    }
+
+    const subscription = player.addListener("statusChange", ({ status }) => {
+      if (status === "readyToPlay") {
+        player.play();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [player]);
+
   return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls allowsFullscreen />;
 }
 

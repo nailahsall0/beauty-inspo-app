@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { View, Pressable, StyleSheet, useWindowDimensions, Text } from "react-native";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -61,8 +61,23 @@ function AutoVideo({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = true;
-    p.play();
   });
+
+  useEffect(() => {
+    // Play when player becomes ready
+    if (player.status === "readyToPlay") {
+      player.play();
+    }
+
+    const subscription = player.addListener("statusChange", ({ status }) => {
+      if (status === "readyToPlay") {
+        player.play();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [player]);
+
   return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
 }
 
