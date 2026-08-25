@@ -727,6 +727,7 @@ function PostVideo({ uri }: { uri: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
@@ -796,10 +797,11 @@ function PostVideo({ uri }: { uri: string }) {
           player={player}
           style={{ width: "100%", height: "100%" }}
           contentFit="cover"
-          nativeControls={false}
-          allowsFullscreen
+          nativeControls={isFullscreen}
+          onFullscreenEnter={() => setIsFullscreen(true)}
+          onFullscreenExit={() => setIsFullscreen(false)}
         />
-        {!isPlaying && (
+        {!isPlaying && !isFullscreen && (
           <View style={styles.playOverlay}>
             <View style={styles.playButton}>
               <MaterialCommunityIcons name="play" size={40} color="#FFF" />
@@ -808,7 +810,8 @@ function PostVideo({ uri }: { uri: string }) {
         )}
       </Pressable>
 
-      {/* Bottom controls */}
+      {/* Bottom controls - hide in fullscreen since native controls are shown */}
+      {!isFullscreen && (
       <View style={[styles.videoControls, { backgroundColor: "rgba(0,0,0,0.5)" }]}>
         <Text style={styles.videoTime}>{formatTime(currentTime)}</Text>
 
@@ -832,6 +835,7 @@ function PostVideo({ uri }: { uri: string }) {
           <MaterialCommunityIcons name="fullscreen" size={24} color="#FFF" />
         </Pressable>
       </View>
+      )}
     </View>
   );
 }
