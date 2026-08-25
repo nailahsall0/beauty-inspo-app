@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, useWindowDimensions, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
@@ -722,27 +722,118 @@ function post_tag_confirmed(post: any) {
 }
 
 function PostVideo({ uri }: { uri: string }) {
+  const { colors } = useTheme();
+  const videoRef = useRef<any>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = false;
+    p.timeUpdateEventInterval = 0.25;
   });
 
   useEffect(() => {
-    // Play when player becomes ready
     if (player.status === "readyToPlay") {
+      setDuration(player.duration);
       player.play();
     }
 
-    const subscription = player.addListener("statusChange", ({ status }) => {
+    const statusSub = player.addListener("statusChange", ({ status }) => {
       if (status === "readyToPlay") {
+        setDuration(player.duration);
         player.play();
       }
     });
 
-    return () => subscription.remove();
+    const playingSub = player.addListener("playingChange", ({ isPlaying: playing }) => {
+      setIsPlaying(playing);
+    });
+
+    const timeSub = player.addListener("timeUpdate", ({ currentTime: time }) => {
+      setCurrentTime(time);
+    });
+
+    return () => {
+      statusSub.remove();
+      playingSub.remove();
+      timeSub.remove();
+    };
   }, [player]);
 
-  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls allowsFullscreen />;
+  const togglePlay = () => {
+    if (isPlaying) {
+      player.pause();
+    } else {
+      player.play();
+    }
+  };
+
+  const enterFullscreen = () => {
+    videoRef.current?.enterFullscreen();
+  };
+
+  const handleSeek = (ratio: number) => {
+    const newTime = ratio * duration;
+    player.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <View style={styles.videoContainer}>
+      <Pressable onPress={togglePlay} style={{ flex: 1 }}>
+        <VideoView
+          ref={videoRef}
+          player={player}
+          style={{ width: "100%", height: "100%" }}
+          contentFit="cover"
+          nativeControls={false}
+          allowsFullscreen
+        />
+        {!isPlaying && (
+          <View style={styles.playOverlay}>
+            <View style={styles.playButton}>
+              <MaterialCommunityIcons name="play" size={40} color="#FFF" />
+            </View>
+          </View>
+        )}
+      </Pressable>
+
+      {/* Bottom controls */}
+      <View style={[styles.videoControls, { backgroundColor: "rgba(0,0,0,0.5)" }]}>
+        <Text style={styles.videoTime}>{formatTime(currentTime)}</Text>
+
+        <Pressable
+          style={styles.seekBar}
+          onPress={(e) => {
+            const { locationX } = e.nativeEvent;
+            const width = e.currentTarget.offsetWidth || 200;
+            handleSeek(Math.max(0, Math.min(1, locationX / width)));
+          }}
+        >
+          <View style={styles.seekTrack}>
+            <View style={[styles.seekProgress, { width: `${progress}%`, backgroundColor: colors.brandDeep }]} />
+          </View>
+          <View style={[styles.seekThumb, { left: `${progress}%`, backgroundColor: colors.brandDeep }]} />
+        </Pressable>
+
+        <Text style={styles.videoTime}>{formatTime(duration)}</Text>
+
+        <Pressable onPress={enterFullscreen} hitSlop={8} style={{ marginLeft: spacing.sm }}>
+          <MaterialCommunityIcons name="fullscreen" size={24} color="#FFF" />
+        </Pressable>
+      </View>
+    </View>
+  );
 }
 
 function DetailRow({ label, value, colors }: { label: string; value?: string | null; colors: any }) {
@@ -757,6 +848,15 @@ function DetailRow({ label, value, colors }: { label: string; value?: string | n
 
 const styles = StyleSheet.create({
   heroBar: { position: "absolute", left: spacing.lg, right: spacing.lg, flexDirection: "row", justifyContent: "space-between" },
+  videoContainer: { width: "100%", height: "100%", backgroundColor: "#000" },
+  playOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  playButton: { width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
+  videoControls: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  videoTime: { fontFamily: font.medium, fontSize: 12, color: "#FFF", minWidth: 40 },
+  seekBar: { flex: 1, height: 24, justifyContent: "center", marginHorizontal: spacing.sm },
+  seekTrack: { height: 4, backgroundColor: "rgba(255,255,255,0.3)", borderRadius: 2 },
+  seekProgress: { position: "absolute", height: 4, borderRadius: 2 },
+  seekThumb: { position: "absolute", width: 14, height: 14, borderRadius: 7, marginLeft: -7, top: 5 },
   body: { padding: spacing.lg },
   authorRow: { flexDirection: "row", alignItems: "center" },
   authorName: { fontFamily: font.bold, fontSize: 15 },
