@@ -126,8 +126,8 @@ export default function CreatePost() {
       allowsMultipleSelection: true,
       quality: 0.7,
       selectionLimit: 5,
-      videoMaxDuration: 60, // Limit videos to 60 seconds
-      videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium, // Compress videos
+      videoMaxDuration: 5, // Limit videos to 5 seconds
+      videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
     });
     if (result.canceled) return;
     setUploading(true);
@@ -135,8 +135,8 @@ export default function CreatePost() {
       const uploaded: Media[] = [];
       for (const asset of result.assets) {
         // Check video duration (fallback check in case videoMaxDuration didn't work)
-        if (asset.type === "video" && asset.duration && asset.duration > 60000) {
-          toast.show("Videos must be under 60 seconds", "error");
+        if (asset.type === "video" && asset.duration && asset.duration > 5000) {
+          toast.show("Videos must be 5 seconds or less", "error");
           continue;
         }
         const name = asset.fileName || `upload.${asset.type === "video" ? "mp4" : "jpg"}`;
@@ -233,7 +233,8 @@ export default function CreatePost() {
         {step === 0 && (
           <View>
             <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add your look</Text>
-            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Choose the photos or videos that show off the look.</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Add photos or short video clips that showcase your look.</Text>
+            <Text style={[type.small, { color: colors.muted, marginTop: spacing.xs }]}>Videos: 5 seconds max</Text>
             <View style={styles.mediaGrid}>
               {media.map((m, i) => (
                 <View key={i} style={[styles.mediaThumb, { backgroundColor: colors.surfaceTertiary }]}>
