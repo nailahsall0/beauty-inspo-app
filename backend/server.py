@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, RedirectResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
@@ -1757,8 +1757,31 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
 
 
 @api.get("/files/{path:path}")
-async def get_file(path: str):
-    """Serve files from S3-compatible storage."""
+async def get_file(path: str, request: Request):
+    """Serve files from S3-compatible storage.
+
+    For videos, redirect to presigned S3 URL for proper streaming support.
+    For images, proxy through backend with caching.
+    """
+    s3 = _get_s3()
+
+    # Check if this is a video file
+    is_video = path.lower().endswith(('.mp4', '.mov', '.m4v', '.webm', '.avi'))
+
+    if is_video:
+        # Generate presigned URL for video streaming (1 hour expiry)
+        try:
+            presigned_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': S3_BUCKET, 'Key': path},
+                ExpiresIn=3600
+            )
+            return RedirectResponse(url=presigned_url, status_code=302)
+        except Exception as e:
+            logger.error(f"Error generating presigned URL for {path}: {e}")
+            raise HTTPException(500, "Failed to generate video URL")
+
+    # For images, proxy through backend
     try:
         content, content_type = await run_in_threadpool(get_object, path)
     except HTTPException:
