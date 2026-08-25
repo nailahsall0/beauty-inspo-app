@@ -58,18 +58,20 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
 }
 
 function AutoVideo({ uri }: { uri: string }) {
+  console.log("[AutoVideo] Rendering with uri:", uri);
+
   const player = useVideoPlayer(uri, (p) => {
+    console.log("[AutoVideo] Setup callback, status:", p.status);
     p.loop = true;
     p.muted = true;
+    p.play(); // Try playing immediately
   });
 
   useEffect(() => {
-    // Play when player becomes ready
-    if (player.status === "readyToPlay") {
-      player.play();
-    }
+    console.log("[AutoVideo] useEffect, player status:", player.status);
 
-    const subscription = player.addListener("statusChange", ({ status }) => {
+    const subscription = player.addListener("statusChange", ({ status, error }) => {
+      console.log("[AutoVideo] Status changed to:", status, error ? `Error: ${error.message}` : "");
       if (status === "readyToPlay") {
         player.play();
       }
