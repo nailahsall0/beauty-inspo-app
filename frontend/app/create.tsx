@@ -123,10 +123,10 @@ export default function CreatePost() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images", "videos"],
-      allowsMultipleSelection: true,
+      allowsMultipleSelection: false,
       quality: 0.7,
-      selectionLimit: 5,
-      videoMaxDuration: 5, // Limit videos to 5 seconds
+      selectionLimit: 1,
+      videoMaxDuration: 5,
       videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
     });
     if (result.canceled) return;
@@ -144,7 +144,7 @@ export default function CreatePost() {
         const res = await uploadMedia(asset.uri, name, mime);
         uploaded.push({ url: res.url, type: res.type, width: asset.width, height: asset.height });
       }
-      setMedia((m) => [...m, ...uploaded]);
+      setMedia(uploaded); // Replace instead of append (only 1 allowed)
     } catch (e: any) {
       const msg = e?.message?.includes("413") ? "Video too large, try a shorter one" : "Upload failed, try again";
       toast.show(msg, "error");
@@ -233,7 +233,7 @@ export default function CreatePost() {
         {step === 0 && (
           <View>
             <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add your look</Text>
-            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Add photos or short video clips that showcase your look.</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Add a photo or short video clip that showcases your look.</Text>
             <Text style={[type.small, { color: colors.muted, marginTop: spacing.xs }]}>Videos: 5 seconds max</Text>
             <View style={styles.mediaGrid}>
               {media.map((m, i) => (
@@ -244,14 +244,19 @@ export default function CreatePost() {
                       <MaterialCommunityIcons name="play-circle" size={28} color="#FFFFFF" />
                     </View>
                   )}
-                  <Pressable testID={`remove-media-${i}`} onPress={() => setMedia((arr) => arr.filter((_, x) => x !== i))} style={styles.removeMedia}>
+                  <Pressable testID={`remove-media-${i}`} onPress={() => setMedia([])} style={styles.removeMedia}>
                     <MaterialCommunityIcons name="close" size={14} color="#FFFFFF" />
+                  </Pressable>
+                  <Pressable testID={`change-media-${i}`} onPress={pickMedia} style={styles.changeMedia}>
+                    <MaterialCommunityIcons name="sync" size={14} color="#FFFFFF" />
                   </Pressable>
                 </View>
               ))}
+              {media.length === 0 && (
               <Pressable testID="create-pick-media" onPress={pickMedia} style={[styles.addMedia, { borderColor: colors.borderStrong }]}>
                 {uploading ? <Loading /> : <><MaterialCommunityIcons name="camera-plus-outline" size={28} color={colors.brandDeep} /><Text style={[styles.addMediaText, { color: colors.brandDeep }]}>Add</Text></>}
               </Pressable>
+              )}
             </View>
           </View>
         )}
@@ -545,6 +550,7 @@ const styles = StyleSheet.create({
   mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden" },
   videoIndicator: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
   removeMedia: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
+  changeMedia: { position: "absolute", bottom: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
   addMedia: { width: 100, height: 130, borderRadius: radius.md, borderWidth: 1.5, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
   addMediaText: { fontFamily: font.semibold, fontSize: 12 },
   captionInput: { borderRadius: radius.lg, padding: spacing.lg, minHeight: 140, fontFamily: font.medium, fontSize: 16, marginTop: spacing.lg, textAlignVertical: "top", borderWidth: 1 },
