@@ -56,14 +56,29 @@ export async function uploadMedia(uri: string, name: string, type: string): Prom
   } else {
     form.append("file", { uri, name, type } as any);
   }
-  const res = await fetch(`${API}/upload`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: form,
-  });
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Upload failed: ${res.status}`);
+
+  // Use AbortController for timeout (2 minutes for large videos)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const res = await fetch(`${API}/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      throw new Error(`Upload failed: ${res.status}`);
+    }
+    return res.json();
+  } catch (e: any) {
+    clearTimeout(timeout);
+    if (e.name === "AbortError") {
+      throw new Error("Upload timed out - video may be too large");
+    }
+    throw e;
   }
-  return res.json();
 }

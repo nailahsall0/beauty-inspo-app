@@ -126,20 +126,28 @@ export default function CreatePost() {
       allowsMultipleSelection: true,
       quality: 0.7,
       selectionLimit: 5,
+      videoMaxDuration: 60, // Limit videos to 60 seconds
+      videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium, // Compress videos
     });
     if (result.canceled) return;
     setUploading(true);
     try {
       const uploaded: Media[] = [];
       for (const asset of result.assets) {
+        // Check video duration (fallback check in case videoMaxDuration didn't work)
+        if (asset.type === "video" && asset.duration && asset.duration > 60000) {
+          toast.show("Videos must be under 60 seconds", "error");
+          continue;
+        }
         const name = asset.fileName || `upload.${asset.type === "video" ? "mp4" : "jpg"}`;
         const mime = asset.mimeType || (asset.type === "video" ? "video/mp4" : "image/jpeg");
         const res = await uploadMedia(asset.uri, name, mime);
         uploaded.push({ url: res.url, type: res.type, width: asset.width, height: asset.height });
       }
       setMedia((m) => [...m, ...uploaded]);
-    } catch {
-      toast.show("Upload failed, try again", "error");
+    } catch (e: any) {
+      const msg = e?.message?.includes("413") ? "Video too large, try a shorter one" : "Upload failed, try again";
+      toast.show(msg, "error");
     } finally {
       setUploading(false);
     }
