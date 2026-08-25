@@ -1262,6 +1262,9 @@ async def pro_me(user: dict = Depends(get_current_user)):
     if not user.get("professional_id"):
         raise HTTPException(404, "No professional profile")
     pro = await db.professional_profiles.find_one({"id": user["professional_id"]}, {"_id": 0})
+    # Fall back to user's avatar if pro avatar is not set
+    if not pro.get("avatar_url"):
+        pro["avatar_url"] = user.get("avatar_url")
     return pro
 
 
@@ -1301,6 +1304,9 @@ async def get_professional(pro_id: str, viewer: Optional[dict] = Depends(get_opt
         raise HTTPException(404, "Professional not found")
     owner = await db.users.find_one({"id": pro["user_id"]}, {"_id": 0})
     pro["owner"] = public_user(owner) if owner else None
+    # Fall back to user's avatar if pro avatar is not set
+    if not pro.get("avatar_url") and owner:
+        pro["avatar_url"] = owner.get("avatar_url")
     pro["followers"] = await db.follows.count_documents({"following_id": pro["user_id"]})
     pro["post_count"] = await db.posts.count_documents({"author_id": pro["user_id"]})
     pro["is_following"] = False
