@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, useWindowDimensions, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,7 +23,6 @@ import { spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
 import { Post } from "@/src/components/Feed";
-import { VideoPlayer } from "@/src/components/VideoPlayer";
 import { SaveSheet } from "@/src/components/SaveSheet";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
@@ -245,7 +245,7 @@ export default function PostDetail() {
           style={{ width, aspectRatio: 0.85, backgroundColor: colors.surfaceTertiary }}
           onPress={() => !isVideo && setShowImageViewer(true)}
         >
-          {media && (isVideo ? <VideoPlayer uri={mediaUrl(media.url)!} showControls muted={false} loop /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
+          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
           <View style={[styles.heroBar, { top: insets.top + spacing.sm }]}>
             <IconBtn icon="chevron-left" onPress={() => router.back()} bg="rgba(253,251,247,0.9)" />
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
@@ -719,6 +719,15 @@ function ZoomableImage({ uri, onClose, onDownload }: { uri?: string; onClose: ()
 
 function post_tag_confirmed(post: any) {
   return post.tag_status === "confirmed";
+}
+
+function PostVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = false;
+    p.play();
+  });
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls allowsFullscreen />;
 }
 
 function DetailRow({ label, value, colors }: { label: string; value?: string | null; colors: any }) {

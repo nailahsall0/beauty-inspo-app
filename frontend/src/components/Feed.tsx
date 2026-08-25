@@ -1,12 +1,12 @@
 import React from "react";
 import { View, Pressable, StyleSheet, useWindowDimensions, Text } from "react-native";
 import { Image } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { spacing, radius, font } from "@/src/theme/tokens";
 import { mediaUrl } from "@/src/lib/api";
 import { useTheme } from "@/src/hooks/useTheme";
-import { VideoPlayer } from "./VideoPlayer";
 
 export type Post = {
   id: string;
@@ -42,7 +42,7 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
     >
       <View style={{ width, height: h, backgroundColor: colors.surfaceTertiary }}>
         {first?.type === "video" ? (
-          <VideoPlayer uri={mediaUrl(first.url)!} showControls={false} />
+          <AutoVideo uri={mediaUrl(first.url)!} />
         ) : url ? (
           <Image source={{ uri: url }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={250} />
         ) : null}
@@ -55,6 +55,15 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
       </View>
     </Pressable>
   );
+}
+
+function AutoVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
 }
 
 export function MasonryFeed({ posts, containerWidth, tight }: { posts: Post[]; containerWidth?: number; tight?: boolean }) {
