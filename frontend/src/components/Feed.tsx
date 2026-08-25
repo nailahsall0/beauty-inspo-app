@@ -1,11 +1,12 @@
 import React from "react";
 import { View, Pressable, StyleSheet, useWindowDimensions, Text } from "react-native";
 import { Image } from "expo-image";
-import { useVideoPlayer, VideoView } from "expo-video";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors, spacing, radius, font } from "@/src/theme/tokens";
+import { spacing, radius, font } from "@/src/theme/tokens";
 import { mediaUrl } from "@/src/lib/api";
+import { useTheme } from "@/src/hooks/useTheme";
+import { VideoPlayer } from "./VideoPlayer";
 
 export type Post = {
   id: string;
@@ -28,6 +29,7 @@ export type Post = {
 
 export function FeedCard({ post, width }: { post: Post; width: number }) {
   const router = useRouter();
+  const { colors } = useTheme();
   const first = post.media?.[0];
   const ar = first?.width && first?.height ? first.width / first.height : 0.8;
   const h = Math.max(160, Math.min(width / ar, width * 1.7));
@@ -36,32 +38,23 @@ export function FeedCard({ post, width }: { post: Post; width: number }) {
     <Pressable
       testID={`feed-card-${post.id}`}
       onPress={() => router.push(`/post/${post.id}`)}
-      style={styles.card}
+      style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
     >
       <View style={{ width, height: h, backgroundColor: colors.surfaceTertiary }}>
         {first?.type === "video" ? (
-          <AutoVideo uri={mediaUrl(first.url)!} />
+          <VideoPlayer uri={mediaUrl(first.url)!} showControls={false} />
         ) : url ? (
           <Image source={{ uri: url }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={250} />
         ) : null}
         {post.distance != null && (
           <View style={styles.distanceBadge}>
             <MaterialCommunityIcons name="map-marker" size={12} color={colors.white} />
-            <Text style={styles.distanceText}>{post.distance} mi</Text>
+            <Text style={[styles.distanceText, { color: colors.white }]}>{post.distance} mi</Text>
           </View>
         )}
       </View>
     </Pressable>
   );
-}
-
-function AutoVideo({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-    p.play();
-  });
-  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" nativeControls={false} />;
 }
 
 export function MasonryFeed({ posts, containerWidth, tight }: { posts: Post[]; containerWidth?: number; tight?: boolean }) {
@@ -98,12 +91,10 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: radius.lg,
     overflow: "hidden",
-    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   scrim: { position: "absolute", bottom: 0, left: 0, right: 0, height: "45%" },
-  videoPlaceholder: { width: "100%", height: "100%", backgroundColor: colors.onSurface, alignItems: "center", justifyContent: "center" },
+  videoPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
   playCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
   videoTag: {
     position: "absolute",
@@ -131,6 +122,5 @@ const styles = StyleSheet.create({
   distanceText: {
     fontFamily: font.semibold,
     fontSize: 11,
-    color: colors.white,
   },
 });

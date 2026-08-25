@@ -7,9 +7,12 @@ export const TOKEN_KEY = "brookie_token";
 
 // Resolve a media url that may be a relative /api/files/... path or an absolute url.
 export function mediaUrl(url?: string | null): string | undefined {
-  if (!url) return undefined;
+  // Handle null, undefined, and empty strings
+  if (!url || url.trim() === "") return undefined;
   if (url.startsWith("http")) return url;
   if (url.startsWith("/api")) return `${BASE}${url}`;
+  // Handle S3/R2 bucket paths that might not have http prefix
+  if (url.startsWith("/")) return `${BASE}${url}`;
   return url;
 }
 

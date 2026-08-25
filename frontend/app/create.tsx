@@ -8,11 +8,12 @@ import * as Location from "expo-location";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
+import { spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, uploadMedia, mediaUrl } from "@/src/lib/api";
 import { Btn, Loading } from "@/src/components/ui";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
+import { useTheme } from "@/src/hooks/useTheme";
 
 type Media = { url: string; type: string; width?: number; height?: number };
 type Cat = { id: string; name: string; icon: string };
@@ -26,6 +27,7 @@ export default function CreatePost() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const toast = useToast();
+  const { colors } = useTheme();
 
   const [step, setStep] = useState(0);
   const [media, setMedia] = useState<Media[]>([]);
@@ -48,6 +50,7 @@ export default function CreatePost() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [proQuery, setProQuery] = useState("");
   const [proResults, setProResults] = useState<any[]>([]);
+  const [proSearching, setProSearching] = useState(false);
   const [taggedPro, setTaggedPro] = useState<any>(null);
   const [postAsPro, setPostAsPro] = useState(!!user?.is_professional);
   const [publishing, setPublishing] = useState(false);
@@ -92,10 +95,13 @@ export default function CreatePost() {
   }, [catId]);
 
   useEffect(() => {
-    if (proQuery.trim().length < 2) { setProResults([]); return; }
+    if (proQuery.trim().length < 1) { setProResults([]); setProSearching(false); return; }
+    setProSearching(true);
     const t = setTimeout(() => {
-      apiFetch(`/professionals/search?q=${encodeURIComponent(proQuery.trim())}`).then(setProResults).catch(() => {});
-    }, 300);
+      apiFetch(`/professionals/search?q=${encodeURIComponent(proQuery.trim())}`)
+        .then((r) => { setProResults(r); setProSearching(false); })
+        .catch(() => { setProResults([]); setProSearching(false); });
+    }, 150);
     return () => clearTimeout(t);
   }, [proQuery]);
 
@@ -208,34 +214,34 @@ export default function CreatePost() {
         <Pressable testID="create-back" onPress={() => (step === 0 ? router.back() : setStep(step - 1))} hitSlop={8}>
           <MaterialCommunityIcons name={step === 0 ? "close" : "chevron-left"} size={26} color={colors.onSurface} />
         </Pressable>
-        <Text style={styles.headerTitle}>{STEPS[step]}</Text>
-        <Text style={styles.stepCount}>{step + 1}/{STEPS.length}</Text>
+        <Text style={[styles.headerTitle, { color: colors.onSurface }]}>{STEPS[step]}</Text>
+        <Text style={[styles.stepCount, { color: colors.muted }]}>{step + 1}/{STEPS.length}</Text>
       </View>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${((step + 1) / STEPS.length) * 100}%` }]} />
+      <View style={[styles.progressTrack, { backgroundColor: colors.surfaceTertiary }]}>
+        <View style={[styles.progressFill, { width: `${((step + 1) / STEPS.length) * 100}%`, backgroundColor: colors.brandDeep }]} />
       </View>
 
       <KeyboardAwareScrollView contentContainerStyle={styles.content} bottomOffset={90} showsVerticalScrollIndicator={false}>
         {step === 0 && (
           <View>
-            <Text style={styles.stepTitle}>Add your look</Text>
-            <Text style={type.body}>Choose the photos or videos that show off the look.</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add your look</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Choose the photos or videos that show off the look.</Text>
             <View style={styles.mediaGrid}>
               {media.map((m, i) => (
-                <View key={i} style={styles.mediaThumb}>
+                <View key={i} style={[styles.mediaThumb, { backgroundColor: colors.surfaceTertiary }]}>
                   <Image source={{ uri: mediaUrl(m.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
                   {m.type === "video" && (
                     <View style={styles.videoIndicator}>
-                      <MaterialCommunityIcons name="play-circle" size={28} color={colors.white} />
+                      <MaterialCommunityIcons name="play-circle" size={28} color="#FFFFFF" />
                     </View>
                   )}
                   <Pressable testID={`remove-media-${i}`} onPress={() => setMedia((arr) => arr.filter((_, x) => x !== i))} style={styles.removeMedia}>
-                    <MaterialCommunityIcons name="close" size={14} color={colors.white} />
+                    <MaterialCommunityIcons name="close" size={14} color="#FFFFFF" />
                   </Pressable>
                 </View>
               ))}
-              <Pressable testID="create-pick-media" onPress={pickMedia} style={styles.addMedia}>
-                {uploading ? <Loading /> : <><MaterialCommunityIcons name="camera-plus-outline" size={28} color={colors.brandDeep} /><Text style={styles.addMediaText}>Add</Text></>}
+              <Pressable testID="create-pick-media" onPress={pickMedia} style={[styles.addMedia, { borderColor: colors.borderStrong }]}>
+                {uploading ? <Loading /> : <><MaterialCommunityIcons name="camera-plus-outline" size={28} color={colors.brandDeep} /><Text style={[styles.addMediaText, { color: colors.brandDeep }]}>Add</Text></>}
               </Pressable>
             </View>
           </View>
@@ -243,7 +249,7 @@ export default function CreatePost() {
 
         {step === 1 && (
           <View>
-            <Text style={styles.stepTitle}>Write a caption</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Write a caption</Text>
             <TextInput
               testID="create-caption"
               value={caption}
@@ -251,12 +257,12 @@ export default function CreatePost() {
               placeholder="Birthday hair ❤️"
               placeholderTextColor={colors.faint}
               multiline
-              style={styles.captionInput}
+              style={[styles.captionInput, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]}
             />
             {user?.is_professional && (
               <Pressable testID="post-as-pro" onPress={() => setPostAsPro((p) => !p)} style={styles.toggle}>
                 <MaterialCommunityIcons name={postAsPro ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={colors.brandDeep} />
-                <Text style={styles.toggleText}>Post as my professional profile</Text>
+                <Text style={[styles.toggleText, { color: colors.onSurface }]}>Post as my professional profile</Text>
               </Pressable>
             )}
           </View>
@@ -264,25 +270,25 @@ export default function CreatePost() {
 
         {step === 2 && (
           <View>
-            <Text style={styles.stepTitle}>Select a category</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Select a category</Text>
             <View style={styles.chips}>
               {cats.map((c) => (
-                <Pressable key={c.id} testID={`create-cat-${c.name}`} onPress={() => { setCatId(c.id); setCatName(c.name); setSvc(null); setSvcMode("pick"); }} style={[styles.optChip, catId === c.id && styles.optChipActive]}>
+                <Pressable key={c.id} testID={`create-cat-${c.name}`} onPress={() => { setCatId(c.id); setCatName(c.name); setSvc(null); setSvcMode("pick"); }} style={[styles.optChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }, catId === c.id && { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }]}>
                   <MaterialCommunityIcons name={c.icon as any} size={18} color={catId === c.id ? colors.onSurfaceInverse : colors.brandDeep} />
-                  <Text style={[styles.optChipText, catId === c.id && { color: colors.onSurfaceInverse }]}>{c.name}</Text>
+                  <Text style={[styles.optChipText, { color: colors.onSurface }, catId === c.id && { color: colors.onSurfaceInverse }]}>{c.name}</Text>
                 </Pressable>
               ))}
             </View>
             {catName === "Other" && (
               <View style={{ marginTop: spacing.lg }}>
-                <Text style={styles.fieldLabel}>Enter your category</Text>
+                <Text style={[styles.fieldLabel, { color: colors.onSurface }]}>Enter your category</Text>
                 <TextInput
                   testID="create-custom-category"
                   value={customCategory}
                   onChangeText={setCustomCategory}
                   placeholder="e.g. Editorial Makeup"
                   placeholderTextColor={colors.faint}
-                  style={styles.smallInput}
+                  style={[styles.smallInput, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]}
                 />
               </View>
             )}
@@ -291,29 +297,29 @@ export default function CreatePost() {
 
         {step === 3 && (
           <View>
-            <Text style={styles.stepTitle}>Select a service</Text>
-            <Text style={type.body}>Optional — what service is this?</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Select a service</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Optional — what service is this?</Text>
             <View style={styles.chips}>
               {services.map((s) => (
-                <Pressable key={s.id} testID={`create-svc-${s.name}`} onPress={() => { setSvcMode("pick"); setSvc(svc?.id === s.id ? null : s); }} style={[styles.optChip, svcMode === "pick" && svc?.id === s.id && styles.optChipActive]}>
-                  <Text style={[styles.optChipText, svcMode === "pick" && svc?.id === s.id && { color: colors.onSurfaceInverse }]}>{s.name}</Text>
+                <Pressable key={s.id} testID={`create-svc-${s.name}`} onPress={() => { setSvcMode("pick"); setSvc(svc?.id === s.id ? null : s); }} style={[styles.optChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }, svcMode === "pick" && svc?.id === s.id && { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }]}>
+                  <Text style={[styles.optChipText, { color: colors.onSurface }, svcMode === "pick" && svc?.id === s.id && { color: colors.onSurfaceInverse }]}>{s.name}</Text>
                 </Pressable>
               ))}
-              <Pressable testID="create-svc-other" onPress={() => { setSvcMode("custom"); setSvc(null); }} style={[styles.optChip, svcMode === "custom" && styles.optChipActive]}>
+              <Pressable testID="create-svc-other" onPress={() => { setSvcMode("custom"); setSvc(null); }} style={[styles.optChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }, svcMode === "custom" && { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }]}>
                 <MaterialCommunityIcons name="plus" size={16} color={svcMode === "custom" ? colors.onSurfaceInverse : colors.brandDeep} />
-                <Text style={[styles.optChipText, svcMode === "custom" && { color: colors.onSurfaceInverse }]}>Other / Custom</Text>
+                <Text style={[styles.optChipText, { color: colors.onSurface }, svcMode === "custom" && { color: colors.onSurfaceInverse }]}>Other / Custom</Text>
               </Pressable>
             </View>
             {svcMode === "custom" && (
               <View style={{ marginTop: spacing.lg }}>
-                <Text style={styles.fieldLabel}>Custom service</Text>
+                <Text style={[styles.fieldLabel, { color: colors.onSurface }]}>Custom service</Text>
                 <TextInput
                   testID="create-custom-service"
                   value={customService}
                   onChangeText={setCustomService}
                   placeholder="e.g. Mermaid Knotless Braids"
                   placeholderTextColor={colors.faint}
-                  style={styles.smallInput}
+                  style={[styles.smallInput, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]}
                 />
               </View>
             )}
@@ -322,12 +328,12 @@ export default function CreatePost() {
 
         {step === 4 && (
           <View>
-            <Text style={styles.stepTitle}>Add styles</Text>
-            <Text style={type.body}>Search or create style tags. Add as many as you like.</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add styles</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Search or create style tags. Add as many as you like.</Text>
             {selectedStyles.length > 0 && (
               <View style={[styles.chips, { marginTop: spacing.md }]}>
                 {selectedStyles.map((s) => (
-                  <Pressable key={s} testID={`style-tag-${s}`} onPress={() => setSelectedStyles((arr) => arr.filter((x) => x !== s))} style={[styles.optChip, styles.optChipActive]}>
+                  <Pressable key={s} testID={`style-tag-${s}`} onPress={() => setSelectedStyles((arr) => arr.filter((x) => x !== s))} style={[styles.optChip, { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }]}>
                     <Text style={[styles.optChipText, { color: colors.onSurfaceInverse }]}>{s}</Text>
                     <MaterialCommunityIcons name="close" size={15} color={colors.onSurfaceInverse} />
                   </Pressable>
@@ -340,7 +346,7 @@ export default function CreatePost() {
               onChangeText={setStyleQuery}
               placeholder="Type a style e.g. Boho, Wispy…"
               placeholderTextColor={colors.faint}
-              style={[styles.smallInput, { marginTop: spacing.md }]}
+              style={[styles.smallInput, { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]}
               autoCapitalize="words"
             />
             <View style={[styles.chips, { marginTop: spacing.md }]}>
@@ -349,14 +355,14 @@ export default function CreatePost() {
                 .filter((s) => !selectedStyles.includes(s.name))
                 .slice(0, 20)
                 .map((s) => (
-                  <Pressable key={s.id} testID={`create-style-${s.name}`} onPress={() => { setSelectedStyles((arr) => [...arr, s.name]); setStyleQuery(""); }} style={styles.optChip}>
-                    <Text style={styles.optChipText}>{s.name}</Text>
+                  <Pressable key={s.id} testID={`create-style-${s.name}`} onPress={() => { setSelectedStyles((arr) => [...arr, s.name]); setStyleQuery(""); }} style={[styles.optChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                    <Text style={[styles.optChipText, { color: colors.onSurface }]}>{s.name}</Text>
                   </Pressable>
                 ))}
               {styleQuery.trim().length > 1 &&
                 !styles_.some((s) => s.name.toLowerCase() === styleQuery.trim().toLowerCase()) &&
                 !selectedStyles.some((s) => s.toLowerCase() === styleQuery.trim().toLowerCase()) && (
-                  <Pressable testID="create-style-add-custom" onPress={() => { setSelectedStyles((arr) => [...arr, styleQuery.trim()]); setStyleQuery(""); }} style={[styles.optChip, { borderColor: colors.brandDeep, borderStyle: "dashed" }]}>
+                  <Pressable testID="create-style-add-custom" onPress={() => { setSelectedStyles((arr) => [...arr, styleQuery.trim()]); setStyleQuery(""); }} style={[styles.optChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.brandDeep, borderStyle: "dashed" }]}>
                     <MaterialCommunityIcons name="plus" size={15} color={colors.brandDeep} />
                     <Text style={[styles.optChipText, { color: colors.brandDeep }]}>Create "{styleQuery.trim()}"</Text>
                   </Pressable>
@@ -367,22 +373,22 @@ export default function CreatePost() {
 
         {step === 5 && (
           <View>
-            <Text style={styles.stepTitle}>Add details</Text>
-            <Text style={type.body}>All optional. Helps others recreate the look.</Text>
-            <View style={styles.hint}>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add details</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>All optional. Helps others recreate the look.</Text>
+            <View style={[styles.hint, { backgroundColor: colors.brandTertiary }]}>
               <MaterialCommunityIcons name="lightbulb-on-outline" size={16} color={colors.brandDeep} />
-              <Text style={styles.hintText}>Filling out these details helps future clients find and recreate this look — and helps pros get discovered.</Text>
+              <Text style={[styles.hintText, { color: colors.brandDeep }]}>Filling out these details helps future clients find and recreate this look — and helps pros get discovered.</Text>
             </View>
             {ATTR_FIELDS.map((f) => (
               <View key={f} style={{ marginTop: spacing.md }}>
-                <Text style={styles.fieldLabel}>{f}</Text>
+                <Text style={[styles.fieldLabel, { color: colors.onSurface }]}>{f}</Text>
                 <TextInput
                   testID={`attr-${f}`}
                   value={attrs[f] || ""}
                   onChangeText={(t) => setAttrs((a) => ({ ...a, [f]: t }))}
                   placeholder={`e.g. ${f === "Length" ? "Waist" : f === "Price" ? "$250" : f}`}
                   placeholderTextColor={colors.faint}
-                  style={styles.smallInput}
+                  style={[styles.smallInput, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]}
                 />
               </View>
             ))}
@@ -391,21 +397,21 @@ export default function CreatePost() {
 
         {step === 6 && (
           <View>
-            <Text style={styles.stepTitle}>Add location</Text>
-            <Text style={type.body}>Help people nearby discover your look.</Text>
-            <View style={styles.hint}>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Add location</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Help people nearby discover your look.</Text>
+            <View style={[styles.hint, { backgroundColor: colors.brandTertiary }]}>
               <MaterialCommunityIcons name="map-marker-radius-outline" size={16} color={colors.brandDeep} />
-              <Text style={styles.hintText}>Adding your location helps your post appear in the Nearby feed so local beauty lovers and pros can find it.</Text>
+              <Text style={[styles.hintText, { color: colors.brandDeep }]}>Adding your location helps your post appear in the Nearby feed so local beauty lovers and pros can find it.</Text>
             </View>
             {locationLoading ? (
-              <View style={styles.locLoadingRow}>
+              <View style={[styles.locLoadingRow, { backgroundColor: colors.surfaceSecondary }]}>
                 <Loading />
-                <Text style={styles.locLoadingText}>Detecting your location...</Text>
+                <Text style={[styles.locLoadingText, { color: colors.muted }]}>Detecting your location...</Text>
               </View>
             ) : coords ? (
               <View style={[styles.locStatusRow, { marginTop: spacing.lg }]}>
                 <MaterialCommunityIcons name="check-circle" size={18} color={colors.brandDeep} />
-                <Text style={styles.locStatusText}>
+                <Text style={[styles.locStatusText, { color: colors.brandDeep }]}>
                   {city && state ? `${city}, ${state}` : "Location added"}
                 </Text>
               </View>
@@ -427,23 +433,34 @@ export default function CreatePost() {
 
         {step === 7 && (
           <View>
-            <Text style={styles.stepTitle}>Tag a professional</Text>
-            <Text style={type.body}>Who did this look? They'll confirm the tag.</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Tag a professional</Text>
+            <Text style={[type.body, { color: colors.onSurfaceSecondary }]}>Who did this look? They'll confirm the tag.</Text>
             {taggedPro ? (
-              <View style={styles.taggedRow}>
+              <View style={[styles.taggedRow, { backgroundColor: colors.brandTertiary }]}>
                 <MaterialCommunityIcons name="check-decagram" size={18} color={colors.brandDeep} />
-                <Text style={styles.taggedText}>@{taggedPro.username}</Text>
+                <Text style={[styles.taggedText, { color: colors.onSurface }]}>@{taggedPro.username}</Text>
                 <Pressable testID="remove-tag" onPress={() => setTaggedPro(null)} style={{ marginLeft: "auto" }}>
                   <MaterialCommunityIcons name="close-circle" size={20} color={colors.faint} />
                 </Pressable>
               </View>
             ) : (
               <>
-                <TextInput testID="tag-search" value={proQuery} onChangeText={setProQuery} placeholder="Search @username or business" placeholderTextColor={colors.faint} autoCapitalize="none" style={[styles.smallInput, { marginTop: spacing.md }]} />
+                <TextInput testID="tag-search" value={proQuery} onChangeText={setProQuery} placeholder="Search @username or business" placeholderTextColor={colors.faint} autoCapitalize="none" style={[styles.smallInput, { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }]} />
+                {proSearching && (
+                  <View style={styles.proSearching}>
+                    <Loading />
+                  </View>
+                )}
+                {!proSearching && proQuery.trim().length >= 1 && proResults.length === 0 && (
+                  <View style={[styles.proNoResults, { backgroundColor: colors.surfaceSecondary }]}>
+                    <MaterialCommunityIcons name="account-search-outline" size={22} color={colors.muted} />
+                    <Text style={[styles.proNoResultsText, { color: colors.muted }]}>No professionals found</Text>
+                  </View>
+                )}
                 {proResults.map((p) => (
-                  <Pressable key={p.id} testID={`tag-result-${p.id}`} onPress={() => { setTaggedPro(p); setProResults([]); setProQuery(""); }} style={styles.proResult}>
-                    <Text style={styles.proResultName}>{p.business_name}</Text>
-                    <Text style={styles.proResultHandle}>@{p.username}</Text>
+                  <Pressable key={p.id} testID={`tag-result-${p.id}`} onPress={() => { setTaggedPro(p); setProResults([]); setProQuery(""); }} style={[styles.proResult, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                    <Text style={[styles.proResultName, { color: colors.onSurface }]}>{p.business_name}</Text>
+                    <Text style={[styles.proResultHandle, { color: colors.muted }]}>@{p.username}</Text>
                   </Pressable>
                 ))}
               </>
@@ -453,29 +470,29 @@ export default function CreatePost() {
 
         {step === 8 && (
           <View>
-            <Text style={styles.stepTitle}>Preview</Text>
+            <Text style={[styles.stepTitle, { color: colors.onSurface }]}>Preview</Text>
             {media[0] && (
               media[0].type === "video" ? (
-                <View style={styles.previewImg}>
+                <View style={[styles.previewImg, { backgroundColor: colors.surfaceTertiary }]}>
                   <PreviewVideo uri={mediaUrl(media[0].url)!} />
                 </View>
               ) : (
-                <Image source={{ uri: mediaUrl(media[0].url) }} style={styles.previewImg} contentFit="cover" />
+                <Image source={{ uri: mediaUrl(media[0].url) }} style={[styles.previewImg, { backgroundColor: colors.surfaceTertiary }]} contentFit="cover" />
               )
             )}
-            {caption ? <Text style={[styles.caption]}>{caption}</Text> : null}
+            {caption ? <Text style={[styles.caption, { color: colors.onSurface }]}>{caption}</Text> : null}
             <View style={styles.previewMeta}>
-              <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} />
-              <PreviewRow label="Service" value={svcMode === "custom" ? customService : svc?.name} />
-              <PreviewRow label="Style" value={selectedStyles.join(", ")} />
-              <PreviewRow label="Location" value={coords ? [city, state].filter(Boolean).join(", ") || "Added" : undefined} />
-              <PreviewRow label="Tagged" value={taggedPro ? `@${taggedPro.username}` : undefined} />
+              <PreviewRow label="Category" value={catName === "Other" && customCategory ? customCategory : catName} colors={colors} />
+              <PreviewRow label="Service" value={svcMode === "custom" ? customService : svc?.name} colors={colors} />
+              <PreviewRow label="Style" value={selectedStyles.join(", ")} colors={colors} />
+              <PreviewRow label="Location" value={coords ? [city, state].filter(Boolean).join(", ") || "Added" : undefined} colors={colors} />
+              <PreviewRow label="Tagged" value={taggedPro ? `@${taggedPro.username}` : undefined} colors={colors} />
             </View>
           </View>
         )}
       </KeyboardAwareScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md, borderTopColor: colors.border, backgroundColor: colors.surface }]}>
         {step < STEPS.length - 1 ? (
           <Btn testID="create-next" label={step === 0 && media.length === 0 ? "Add media to continue" : "Next"} onPress={() => canNext() && setStep(step + 1)} disabled={!canNext()} />
         ) : (
@@ -486,12 +503,12 @@ export default function CreatePost() {
   );
 }
 
-function PreviewRow({ label, value }: { label: string; value?: string }) {
+function PreviewRow({ label, value, colors }: { label: string; value?: string; colors: any }) {
   if (!value) return null;
   return (
     <View style={styles.prevRow}>
-      <Text style={styles.prevLabel}>{label}</Text>
-      <Text style={styles.prevValue}>{value}</Text>
+      <Text style={[styles.prevLabel, { color: colors.muted }]}>{label}</Text>
+      <Text style={[styles.prevValue, { color: colors.onSurface }]}>{value}</Text>
     </View>
   );
 }
@@ -507,43 +524,45 @@ function PreviewVideo({ uri }: { uri: string }) {
 
 const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  headerTitle: { fontFamily: font.bold, fontSize: 17, color: colors.onSurface },
-  stepCount: { fontFamily: font.semibold, fontSize: 13, color: colors.muted },
-  progressTrack: { height: 3, backgroundColor: colors.surfaceTertiary, marginHorizontal: spacing.lg, borderRadius: 2 },
-  progressFill: { height: 3, backgroundColor: colors.brandDeep, borderRadius: 2 },
+  headerTitle: { fontFamily: font.bold, fontSize: 17 },
+  stepCount: { fontFamily: font.semibold, fontSize: 13 },
+  progressTrack: { height: 3, marginHorizontal: spacing.lg, borderRadius: 2 },
+  progressFill: { height: 3, borderRadius: 2 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxxl },
-  stepTitle: { fontFamily: font.displaySemi, fontSize: 26, color: colors.onSurface, marginBottom: spacing.xs },
-  hint: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, backgroundColor: colors.brandTertiary, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md },
-  hintText: { flex: 1, fontFamily: font.medium, fontSize: 12.5, lineHeight: 18, color: colors.brandDeep },
+  stepTitle: { fontFamily: font.displaySemi, fontSize: 26, marginBottom: spacing.xs },
+  hint: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md },
+  hintText: { flex: 1, fontFamily: font.medium, fontSize: 12.5, lineHeight: 18 },
   mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, marginTop: spacing.lg },
-  mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary },
+  mediaThumb: { width: 100, height: 130, borderRadius: radius.md, overflow: "hidden" },
   videoIndicator: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
   removeMedia: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
-  addMedia: { width: 100, height: 130, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.borderStrong, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
-  addMediaText: { fontFamily: font.semibold, fontSize: 12, color: colors.brandDeep },
-  captionInput: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, minHeight: 140, fontFamily: font.medium, fontSize: 16, color: colors.onSurface, marginTop: spacing.lg, textAlignVertical: "top", borderWidth: 1, borderColor: colors.border },
+  addMedia: { width: 100, height: 130, borderRadius: radius.md, borderWidth: 1.5, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
+  addMediaText: { fontFamily: font.semibold, fontSize: 12 },
+  captionInput: { borderRadius: radius.lg, padding: spacing.lg, minHeight: 140, fontFamily: font.medium, fontSize: 16, marginTop: spacing.lg, textAlignVertical: "top", borderWidth: 1 },
   toggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.lg },
-  toggleText: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
+  toggleText: { fontFamily: font.semibold, fontSize: 14 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.lg },
-  optChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.lg, height: 44, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
-  optChipActive: { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse },
-  optChipText: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
-  fieldLabel: { fontFamily: font.semibold, fontSize: 13, color: colors.onSurface, marginBottom: 6 },
-  smallInput: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 48, fontFamily: font.medium, fontSize: 15, color: colors.onSurface, borderWidth: 1, borderColor: colors.border },
-  taggedRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.brandTertiary, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.lg },
-  taggedText: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
-  proResult: { padding: spacing.md, backgroundColor: colors.white, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
-  proResultName: { fontFamily: font.bold, fontSize: 14, color: colors.onSurface },
-  proResultHandle: { fontFamily: font.regular, fontSize: 12, color: colors.muted },
-  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, marginTop: spacing.lg, overflow: "hidden" },
-  caption: { fontFamily: font.regular, fontSize: 15, color: colors.onSurface, marginTop: spacing.md },
+  optChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.lg, height: 44, borderRadius: radius.pill, borderWidth: 1 },
+  optChipText: { fontFamily: font.semibold, fontSize: 14 },
+  fieldLabel: { fontFamily: font.semibold, fontSize: 13, marginBottom: 6 },
+  smallInput: { borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 48, fontFamily: font.medium, fontSize: 15, borderWidth: 1 },
+  taggedRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.lg },
+  taggedText: { fontFamily: font.bold, fontSize: 15 },
+  proResult: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1, marginTop: spacing.sm },
+  proResultName: { fontFamily: font.bold, fontSize: 14 },
+  proResultHandle: { fontFamily: font.regular, fontSize: 12 },
+  proSearching: { marginTop: spacing.md, alignItems: "center", paddingVertical: spacing.md },
+  proNoResults: { marginTop: spacing.md, padding: spacing.lg, borderRadius: radius.md, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  proNoResultsText: { fontFamily: font.medium, fontSize: 14 },
+  previewImg: { width: "100%", aspectRatio: 0.9, borderRadius: radius.lg, marginTop: spacing.lg, overflow: "hidden" },
+  caption: { fontFamily: font.regular, fontSize: 15, marginTop: spacing.md },
   previewMeta: { marginTop: spacing.lg, gap: spacing.sm },
   prevRow: { flexDirection: "row", justifyContent: "space-between" },
-  prevLabel: { fontFamily: font.semibold, fontSize: 12, color: colors.muted, letterSpacing: 0.4 },
-  prevValue: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
-  footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
-  locLoadingRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, marginBottom: spacing.sm },
-  locLoadingText: { fontFamily: font.medium, fontSize: 14, color: colors.muted },
+  prevLabel: { fontFamily: font.semibold, fontSize: 12, letterSpacing: 0.4 },
+  prevValue: { fontFamily: font.semibold, fontSize: 14 },
+  footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1 },
+  locLoadingRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, borderRadius: radius.md, marginBottom: spacing.sm },
+  locLoadingText: { fontFamily: font.medium, fontSize: 14 },
   locStatusRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
-  locStatusText: { fontFamily: font.medium, fontSize: 14, color: colors.brandDeep },
+  locStatusText: { fontFamily: font.medium, fontSize: 14 },
 });

@@ -538,6 +538,7 @@ class PostIn(BaseModel):
 class CommentIn(BaseModel):
     text: str
     parent_id: Optional[str] = None
+    as_professional: bool = False
 
 
 class ServiceItem(BaseModel):
@@ -902,6 +903,27 @@ async def update_post(post_id: str, body: PostIn, user: dict = Depends(get_curre
                "style_name": body.style_name or (body.style_names[0] if body.style_names else None),
                "style_names": body.style_names or ([body.style_name] if body.style_name else []),
                "attributes": body.attributes, "city": body.city, "state": body.state}
+
+    # Handle tagged professional changes
+    old_pro_id = post.get("tagged_professional_id")
+    new_pro_id = body.tagged_professional_id
+    if new_pro_id != old_pro_id:
+        if new_pro_id:
+            # New tag or changed tag - set to pending (or confirmed if self-tagging)
+            tag_status = "confirmed" if user.get("professional_id") == new_pro_id else "pending"
+            updates["tagged_professional_id"] = new_pro_id
+            updates["tag_status"] = tag_status
+            # Notify the new tagged professional if pending
+            if tag_status == "pending":
+                pro = await db.professional_profiles.find_one({"id": new_pro_id})
+                if pro:
+                    await notify(pro["user_id"], "tag_request", user["id"],
+                                 f"{user['display_name']} tagged you in a post", post_id)
+        else:
+            # Tag removed - clear both fields
+            updates["tagged_professional_id"] = None
+            updates["tag_status"] = None
+
     await db.posts.update_one({"id": post_id}, {"$set": updates})
     fresh = await db.posts.find_one({"id": post_id}, {"_id": 0})
     return await enrich_post(fresh, user)
@@ -964,6 +986,12 @@ async def get_comments(post_id: str, user: dict = Depends(get_optional_user)):
     author_ids = list({c["author_id"] for c in comments})
     authors = {u["id"]: u for u in await db.users.find({"id": {"$in": author_ids}}, {"_id": 0}).to_list(len(author_ids))}
 
+    # Batch load professionals for comments marked as_professional
+    pro_ids = list({c["professional_id"] for c in comments if c.get("professional_id")})
+    pros = {}
+    if pro_ids:
+        pros = {p["id"]: p for p in await db.professional_profiles.find({"id": {"$in": pro_ids}}, {"_id": 0}).to_list(len(pro_ids))}
+
     # Get like counts and user's likes
     comment_ids = [c["id"] for c in comments]
     like_counts = {}
@@ -978,6 +1006,10 @@ async def get_comments(post_id: str, user: dict = Depends(get_optional_user)):
         c["author"] = public_user(author) if author else None
         c["like_count"] = like_counts.get(c["id"], 0)
         c["liked"] = c["id"] in user_likes
+        c["as_professional"] = c.get("as_professional", False)
+        if c.get("professional_id") and c["professional_id"] in pros:
+            pro = pros[c["professional_id"]]
+            c["professional"] = {"id": pro["id"], "username": pro["username"], "business_name": pro["business_name"]}
     return comments
 
 
@@ -986,11 +1018,23 @@ async def add_comment(post_id: str, body: CommentIn, user: dict = Depends(get_cu
     post = await db.posts.find_one({"id": post_id})
     if not post:
         raise HTTPException(404, "Post not found")
+
+    # Validate as_professional flag
+    as_professional = body.as_professional
+    professional_id = None
+    professional = None
+    if as_professional:
+        if not user.get("professional_id"):
+            raise HTTPException(400, "You must have a professional profile to comment as a professional")
+        professional_id = user["professional_id"]
+        professional = await db.professional_profiles.find_one({"id": professional_id}, {"_id": 0})
+
     comment = {"id": new_id(), "post_id": post_id, "author_id": user["id"], "parent_id": body.parent_id,
-               "text": body.text, "created_at": now_iso()}
+               "text": body.text, "as_professional": as_professional, "professional_id": professional_id,
+               "created_at": now_iso()}
     await db.comments.insert_one(comment)
     await db.posts.update_one({"id": post_id}, {"$inc": {"comment_count": 1}})
-    await log_event("COMMENT", user["id"], None, post_id)
+    await log_event("COMMENT", user["id"], professional_id, post_id)
     if body.parent_id:
         parent = await db.comments.find_one({"id": body.parent_id})
         if parent:
@@ -1001,6 +1045,10 @@ async def add_comment(post_id: str, body: CommentIn, user: dict = Depends(get_cu
     comment["author"] = public_user(user)
     comment["like_count"] = 0
     comment["liked"] = False
+    comment["as_professional"] = as_professional
+    if professional:
+        comment["professional"] = {"id": professional["id"], "username": professional["username"],
+                                   "business_name": professional["business_name"]}
     return comment
 
 
@@ -1221,7 +1269,18 @@ async def pro_me(user: dict = Depends(get_current_user)):
 async def pro_update(body: ProUpdateIn, user: dict = Depends(get_current_user)):
     if not user.get("professional_id"):
         raise HTTPException(404, "No professional profile")
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    # Filter out None values but keep empty strings (allows clearing fields)
+    # Also strip string fields to avoid whitespace-only values
+    updates = {}
+    for k, v in body.dict().items():
+        if v is None:
+            continue
+        if isinstance(v, str):
+            v = v.strip()
+            # Skip empty strings for required fields like business_name
+            if k == "business_name" and not v:
+                continue
+        updates[k] = v
     if "services" in updates:
         svcs = []
         for s in updates["services"]:
@@ -1353,17 +1412,22 @@ async def add_pro_details(post_id: str, body: ProDetailsIn, user: dict = Depends
 
 # ------------------------- Find a professional (ranking) -------------------------
 @api.get("/posts/{post_id}/professionals")
-async def find_professionals(post_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
+async def find_professionals(post_id: str, strict: bool = False, viewer: Optional[dict] = Depends(get_optional_user)):
     post = await db.posts.find_one({"id": post_id}, {"_id": 0})
     if not post:
         raise HTTPException(404, "Post not found")
     await log_event("FIND_PROFESSIONAL_CLICK", viewer["id"] if viewer else None, None, post_id)
     return await _rank_professionals(post.get("category_id"), post.get("service_name"), post.get("style_name"),
-                                     post.get("lat"), post.get("lng"), post.get("city"), viewer)
+                                     post.get("lat"), post.get("lng"), post.get("city"), viewer, strict=strict)
 
 
-async def _rank_professionals(category_id, service_name, style_name, plat, plng, pcity, viewer):
-    """Rank professionals using aggregation pipeline to avoid N+1 queries."""
+async def _rank_professionals(category_id, service_name, style_name, plat, plng, pcity, viewer, strict: bool = False):
+    """Rank professionals using aggregation pipeline to avoid N+1 queries.
+
+    Args:
+        strict: If True, only return professionals with exact service match.
+    """
+    MIN_SCORE_THRESHOLD = 5  # Minimum score to be included in results
     vlat = viewer.get("lat") if viewer else None
     vlng = viewer.get("lng") if viewer else None
     base_lat = vlat if vlat is not None else plat
@@ -1449,6 +1513,14 @@ async def _rank_professionals(category_id, service_name, style_name, plat, plng,
         # Verification bonus
         if pro.get("verification_status") == "VERIFIED":
             score += 3
+
+        # Apply strict filter: only include exact service matches
+        if strict and reasons.get("service_match") != True:
+            continue
+
+        # Apply minimum score threshold to filter irrelevant results
+        if score < MIN_SCORE_THRESHOLD:
+            continue
 
         results.append({"professional": {
             "id": pro["id"], "username": pro["username"], "business_name": pro["business_name"],

@@ -2,7 +2,6 @@ import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, useWindowDimensions, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
-import { useVideoPlayer, VideoView } from "expo-video";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -19,15 +18,27 @@ try {
 } catch (e) {
   console.log("Media library not available (Expo Go)");
 }
-import { colors, spacing, radius, font, type } from "@/src/theme/tokens";
+import { spacing, radius, font, type } from "@/src/theme/tokens";
 import { apiFetch, mediaUrl } from "@/src/lib/api";
 import { Avatar, VerifiedBadge, Btn, IconBtn, Loading } from "@/src/components/ui";
 import { Post } from "@/src/components/Feed";
+import { VideoPlayer } from "@/src/components/VideoPlayer";
 import { SaveSheet } from "@/src/components/SaveSheet";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
+import { useTheme } from "@/src/hooks/useTheme";
 
-type Comment = { id: string; text: string; parent_id?: string | null; author: any; created_at: string; like_count: number; liked: boolean };
+type Comment = {
+  id: string;
+  text: string;
+  parent_id?: string | null;
+  author: any;
+  created_at: string;
+  like_count: number;
+  liked: boolean;
+  as_professional?: boolean;
+  professional?: { id: string; username: string; business_name: string };
+};
 
 export default function PostDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -36,6 +47,7 @@ export default function PostDetail() {
   const { width } = useWindowDimensions();
   const { user } = useAuth();
   const toast = useToast();
+  const { colors } = useTheme();
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [comment, setComment] = useState("");
@@ -49,6 +61,7 @@ export default function PostDetail() {
   const [loadingPros, setLoadingPros] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
+  const [commentAsPro, setCommentAsPro] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +75,7 @@ export default function PostDetail() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (!post) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loading /></View>;
+  if (!post) return <View style={{ flex: 1, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }}><Loading /></View>;
 
   const media = post.media?.[0];
   const isVideo = media?.type === "video";
@@ -108,8 +121,9 @@ export default function PostDetail() {
   const sendComment = async () => {
     if (!comment.trim()) return;
     try {
-      const body: { text: string; parent_id?: string } = { text: comment.trim() };
+      const body: { text: string; parent_id?: string; as_professional?: boolean } = { text: comment.trim() };
       if (replyingTo) body.parent_id = replyingTo.id;
+      if (commentAsPro && user?.professional_id) body.as_professional = true;
       const c = await apiFetch<Comment>(`/posts/${post.id}/comments`, { method: "POST", body });
       setComments((prev) => [...prev, c]);
       setComment("");
@@ -231,7 +245,7 @@ export default function PostDetail() {
           style={{ width, aspectRatio: 0.85, backgroundColor: colors.surfaceTertiary }}
           onPress={() => !isVideo && setShowImageViewer(true)}
         >
-          {media && (isVideo ? <PostVideo uri={mediaUrl(media.url)!} /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
+          {media && (isVideo ? <VideoPlayer uri={mediaUrl(media.url)!} showControls muted={false} loop /> : <Image source={{ uri: mediaUrl(media.url) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={200} />)}
           <View style={[styles.heroBar, { top: insets.top + spacing.sm }]}>
             <IconBtn icon="chevron-left" onPress={() => router.back()} bg="rgba(253,251,247,0.9)" />
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
@@ -253,45 +267,45 @@ export default function PostDetail() {
           <Pressable style={styles.authorRow} onPress={() => router.push(`/user/${post.author.id}`)} testID="post-author">
             <Avatar uri={post.author?.avatar_url} name={post.author?.display_name} size={40} />
             <View style={{ flex: 1, marginLeft: spacing.md }}>
-              <Text style={styles.authorName}>{post.author?.display_name}</Text>
-              <Text style={styles.authorHandle}>@{post.author?.username} · {post.post_type === "professional" ? "Pro" : "Client"}</Text>
+              <Text style={[styles.authorName, { color: colors.onSurface }]}>{post.author?.display_name}</Text>
+              <Text style={[styles.authorHandle, { color: colors.muted }]}>@{post.author?.username} · {post.post_type === "professional" ? "Pro" : "Client"}</Text>
             </View>
           </Pressable>
 
-          {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
+          {post.caption ? <Text style={[styles.caption, { color: colors.onSurface }]}>{post.caption}</Text> : null}
 
           {/* Title */}
           {(post.service_name || post.style_name) && (
-            <Text style={styles.lookTitle}>{post.service_name || post.style_name}</Text>
+            <Text style={[styles.lookTitle, { color: colors.onSurface }]}>{post.service_name || post.style_name}</Text>
           )}
           {attrEntries.length > 0 && (
-            <Text style={styles.lookSub}>
+            <Text style={[styles.lookSub, { color: colors.muted }]}>
               {attrEntries.slice(0, 2).map(([k, v]) => `${v}`).join(" · ")}
             </Text>
           )}
 
           {/* Details toggle */}
           <Pressable testID="post-view-details" onPress={() => setShowDetails((s) => !s)} style={styles.detailsToggle}>
-            <Text style={styles.detailsToggleText}>{showDetails ? "Hide Details" : "View Details"}</Text>
+            <Text style={[styles.detailsToggleText, { color: colors.brandDeep }]}>{showDetails ? "Hide Details" : "View Details"}</Text>
             <MaterialCommunityIcons name={showDetails ? "chevron-up" : "chevron-down"} size={20} color={colors.brandDeep} />
           </Pressable>
 
           {showDetails && (
-            <View style={styles.detailsCard}>
-              <DetailRow label="SERVICE" value={post.service_name} />
-              <DetailRow label="STYLE" value={post.style_name} />
+            <View style={[styles.detailsCard, { backgroundColor: colors.surfaceSecondary }]}>
+              <DetailRow label="SERVICE" value={post.service_name} colors={colors} />
+              <DetailRow label="STYLE" value={post.style_name} colors={colors} />
               {attrEntries.map(([k, v]) => (
-                <DetailRow key={k} label={k.toUpperCase()} value={String(v)} />
+                <DetailRow key={k} label={k.toUpperCase()} value={String(v)} colors={colors} />
               ))}
-              <DetailRow label="LOCATION" value={[post.city, (post as any).state].filter(Boolean).join(", ")} />
+              <DetailRow label="LOCATION" value={[post.city, (post as any).state].filter(Boolean).join(", ")} colors={colors} />
             </View>
           )}
 
           {/* Professional attribution */}
           {tagged && post_tag_confirmed(post) && (
-            <Pressable testID="post-tagged-pro" onPress={() => router.push(`/professional/${tagged.id}`)} style={styles.proAttrib}>
+            <Pressable testID="post-tagged-pro" onPress={() => router.push(`/professional/${tagged.id}`)} style={[styles.proAttrib, { backgroundColor: colors.brandTertiary }]}>
               <MaterialCommunityIcons name="check-decagram" size={18} color={colors.brandDeep} />
-              <Text style={styles.proAttribText}>
+              <Text style={[styles.proAttribText, { color: colors.onSurface }]}>
                 Done by <Text style={{ fontFamily: font.bold }}>@{tagged.username}</Text>
               </Text>
               <MaterialCommunityIcons name="chevron-right" size={18} color={colors.faint} style={{ marginLeft: "auto" }} />
@@ -300,9 +314,9 @@ export default function PostDetail() {
 
           {/* Pending tag response for the tagged pro */}
           {isTaggedPro && (post as any).tag_status === "pending" && (
-            <View style={styles.tagRespond}>
-              <Text style={styles.tagRespondTitle}>You were tagged in this post</Text>
-              <Text style={type.small}>Confirm if you performed this service.</Text>
+            <View style={[styles.tagRespond, { backgroundColor: colors.surfaceSecondary, borderColor: colors.borderStrong }]}>
+              <Text style={[styles.tagRespondTitle, { color: colors.onSurface }]}>You were tagged in this post</Text>
+              <Text style={[type.small, { color: colors.onSurfaceSecondary }]}>Confirm if you performed this service.</Text>
               <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
                 <Btn testID="tag-reject" label="Reject" variant="outline" onPress={() => respondTag(false)} style={{ flex: 1, height: 44 }} />
                 <Btn testID="tag-confirm" label="Confirm" onPress={() => respondTag(true)} style={{ flex: 1, height: 44 }} />
@@ -312,17 +326,17 @@ export default function PostDetail() {
 
           {/* Professional details block */}
           {post.professional_details ? (
-            <View style={styles.proDetails}>
+            <View style={[styles.proDetails, { backgroundColor: colors.brandTertiary, borderLeftColor: colors.brandDeep }]}>
               <View style={styles.proDetailsHeader}>
                 <MaterialCommunityIcons name="scissors-cutting" size={16} color={colors.brandDeep} />
-                <Text style={styles.proDetailsTitle}>PROFESSIONAL DETAILS</Text>
+                <Text style={[styles.proDetailsTitle, { color: colors.brandDeep }]}>PROFESSIONAL DETAILS</Text>
               </View>
-              <Text style={styles.proDetailsText}>{post.professional_details}</Text>
-              {tagged && <Text style={styles.proDetailsBy}>— @{tagged.username}</Text>}
+              <Text style={[styles.proDetailsText, { color: colors.onSurface }]}>{post.professional_details}</Text>
+              {tagged && <Text style={[styles.proDetailsBy, { color: colors.muted }]}>— @{tagged.username}</Text>}
             </View>
           ) : isTaggedPro && post_tag_confirmed(post) ? (
             addingDetails ? (
-              <View style={styles.proDetails}>
+              <View style={[styles.proDetails, { backgroundColor: colors.brandTertiary, borderLeftColor: colors.brandDeep }]}>
                 <TextInput
                   testID="pro-details-input"
                   value={proDetailsInput}
@@ -330,7 +344,7 @@ export default function PostDetail() {
                   placeholder="Medium boho knotless · Waist length · 3 packs X-Pression · ~6 hours"
                   placeholderTextColor={colors.faint}
                   multiline
-                  style={styles.proDetailsInput}
+                  style={[styles.proDetailsInput, { color: colors.onSurface }]}
                 />
                 <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
                   <Btn label="Cancel" variant="outline" onPress={() => setAddingDetails(false)} style={{ flex: 1, height: 42 }} />
@@ -343,18 +357,18 @@ export default function PostDetail() {
           ) : null}
 
           {/* Actions */}
-          <View style={styles.actions}>
+          <View style={[styles.actions, { borderTopColor: colors.border }]}>
             <Pressable testID="post-like" onPress={toggleLike} style={styles.actionBtn}>
               <MaterialCommunityIcons name={post.liked ? "heart" : "heart-outline"} size={24} color={post.liked ? colors.pinkDeep : colors.onSurface} />
-              <Text style={styles.actionCount}>{post.like_count}</Text>
+              <Text style={[styles.actionCount, { color: colors.onSurface }]}>{post.like_count}</Text>
             </Pressable>
             <View style={styles.actionBtn}>
               <MaterialCommunityIcons name="comment-outline" size={22} color={colors.onSurface} />
-              <Text style={styles.actionCount}>{(post as any).comment_count}</Text>
+              <Text style={[styles.actionCount, { color: colors.onSurface }]}>{(post as any).comment_count}</Text>
             </View>
             <Pressable testID="post-save" onPress={toggleSave} onLongPress={() => setSaveSheet(true)} delayLongPress={250} style={styles.actionBtn}>
               <MaterialCommunityIcons name={post.saved ? "bookmark" : "bookmark-outline"} size={23} color={post.saved ? colors.brandDeep : colors.onSurface} />
-              <Text style={styles.actionCount}>{post.save_count}</Text>
+              <Text style={[styles.actionCount, { color: colors.onSurface }]}>{post.save_count}</Text>
             </Pressable>
             <Pressable testID="post-save-to" onPress={() => setSaveSheet(true)} style={styles.actionBtn}>
               <MaterialCommunityIcons name="folder-plus-outline" size={22} color={colors.onSurface} />
@@ -365,24 +379,31 @@ export default function PostDetail() {
           </View>
 
           {/* Comments */}
-          <Text style={styles.commentsTitle}>Comments</Text>
+          <Text style={[styles.commentsTitle, { color: colors.onSurface }]}>Comments</Text>
           {comments.length === 0 ? (
-            <Text style={[type.small, { marginTop: spacing.sm }]}>Be the first to comment.</Text>
+            <Text style={[type.small, { marginTop: spacing.sm, color: colors.onSurfaceSecondary }]}>Be the first to comment.</Text>
           ) : (
             comments.map((c) => (
               <View key={c.id} style={[styles.comment, c.parent_id && { marginLeft: spacing.xl }]}>
                 <Avatar uri={c.author?.avatar_url} name={c.author?.display_name} size={32} />
                 <View style={{ flex: 1, marginLeft: spacing.sm }}>
-                  <Text style={styles.commentAuthor}>{c.author?.display_name}</Text>
-                  <Text style={styles.commentText}>{c.text}</Text>
+                  <View style={styles.commentAuthorRow}>
+                    <Text style={[styles.commentAuthor, { color: colors.onSurface }]}>{c.author?.display_name}</Text>
+                    {c.as_professional && (
+                      <View style={[styles.proBadge, { backgroundColor: colors.brandTertiary }]}>
+                        <Text style={[styles.proBadgeText, { color: colors.brandDeep }]}>PRO</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.commentText, { color: colors.onSurfaceSecondary }]}>{c.text}</Text>
                   <View style={styles.commentActions}>
                     <Pressable onPress={() => toggleCommentLike(c)} style={styles.commentAction}>
                       <MaterialCommunityIcons name={c.liked ? "heart" : "heart-outline"} size={16} color={c.liked ? colors.pinkDeep : colors.muted} />
-                      {c.like_count > 0 && <Text style={styles.commentActionText}>{c.like_count}</Text>}
+                      {c.like_count > 0 && <Text style={[styles.commentActionText, { color: colors.muted }]}>{c.like_count}</Text>}
                     </Pressable>
                     <Pressable onPress={() => setReplyingTo(c)} style={styles.commentAction}>
                       <MaterialCommunityIcons name="reply" size={16} color={colors.muted} />
-                      <Text style={styles.commentActionText}>Reply</Text>
+                      <Text style={[styles.commentActionText, { color: colors.muted }]}>Reply</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -394,10 +415,16 @@ export default function PostDetail() {
 
       {/* Sticky bottom: comment input + Find Pro */}
       <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm, backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+          {user?.professional_id && (
+            <Pressable testID="comment-as-pro-toggle" onPress={() => setCommentAsPro((p) => !p)} style={styles.commentAsProRow}>
+              <MaterialCommunityIcons name={commentAsPro ? "checkbox-marked" : "checkbox-blank-outline"} size={20} color={colors.brandDeep} />
+              <Text style={[styles.commentAsProText, { color: colors.onSurface }]}>Comment as Pro</Text>
+            </Pressable>
+          )}
           {replyingTo && (
-            <View style={styles.replyingToBar}>
-              <Text style={styles.replyingToText}>Replying to @{replyingTo.author?.username || replyingTo.author?.display_name}</Text>
+            <View style={[styles.replyingToBar, { backgroundColor: colors.surfaceSecondary }]}>
+              <Text style={[styles.replyingToText, { color: colors.brandDeep }]}>Replying to @{replyingTo.author?.username || replyingTo.author?.display_name}</Text>
               <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
                 <MaterialCommunityIcons name="close" size={18} color={colors.muted} />
               </Pressable>
@@ -410,9 +437,9 @@ export default function PostDetail() {
               onChangeText={setComment}
               placeholder={replyingTo ? `Reply to ${replyingTo.author?.display_name}…` : "Add a comment…"}
               placeholderTextColor={colors.faint}
-              style={styles.commentInput}
+              style={[styles.commentInput, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface }]}
             />
-            <Pressable testID="comment-send" onPress={sendComment} style={styles.sendBtn}>
+            <Pressable testID="comment-send" onPress={sendComment} style={[styles.sendBtn, { backgroundColor: colors.brandDeep }]}>
               <MaterialCommunityIcons name="send" size={18} color={colors.onSurfaceInverse} />
             </Pressable>
           </View>
@@ -436,10 +463,10 @@ export default function PostDetail() {
       />
 
       <Modal visible={confirmDelete} transparent animationType="fade" onRequestClose={() => setConfirmDelete(false)}>
-        <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmDelete(false)} />
-        <View style={styles.confirmCard} testID="delete-confirm">
-          <Text style={styles.confirmTitle}>Delete this post?</Text>
-          <Text style={styles.confirmSub}>This can't be undone. Your look will be removed for everyone.</Text>
+        <Pressable style={[styles.confirmBackdrop, { backgroundColor: colors.scrim }]} onPress={() => setConfirmDelete(false)} />
+        <View style={[styles.confirmCard, { backgroundColor: colors.surface }]} testID="delete-confirm">
+          <Text style={[styles.confirmTitle, { color: colors.onSurface }]}>Delete this post?</Text>
+          <Text style={[styles.confirmSub, { color: colors.muted }]}>This can't be undone. Your look will be removed for everyone.</Text>
           <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
             <Btn label="Cancel" variant="outline" onPress={() => setConfirmDelete(false)} style={{ flex: 1, height: 46 }} />
             <Btn testID="delete-confirm-btn" label="Delete" variant="dark" onPress={doDelete} style={{ flex: 1, height: 46 }} />
@@ -450,9 +477,9 @@ export default function PostDetail() {
       {/* Send to Pro Modal */}
       <Modal visible={showShareToPro} transparent animationType="slide" onRequestClose={() => setShowShareToPro(false)}>
         <View style={styles.shareModalOverlay}>
-          <View style={[styles.shareModalContent, { paddingBottom: insets.bottom }]}>
-            <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>Send to a Professional</Text>
+          <View style={[styles.shareModalContent, { paddingBottom: insets.bottom, backgroundColor: colors.surface }]}>
+            <View style={[styles.shareModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.shareModalTitle, { color: colors.onSurface }]}>Send to a Professional</Text>
               <Pressable onPress={() => setShowShareToPro(false)} hitSlop={8}>
                 <MaterialCommunityIcons name="close" size={24} color={colors.onSurface} />
               </Pressable>
@@ -464,21 +491,21 @@ export default function PostDetail() {
             ) : pros.length === 0 ? (
               <View style={styles.shareModalEmpty}>
                 <MaterialCommunityIcons name="account-search" size={48} color={colors.muted} />
-                <Text style={styles.shareModalEmptyText}>No professionals found</Text>
-                <Text style={styles.shareModalEmptySub}>Find a professional from your Nearby feed</Text>
+                <Text style={[styles.shareModalEmptyText, { color: colors.onSurface }]}>No professionals found</Text>
+                <Text style={[styles.shareModalEmptySub, { color: colors.muted }]}>Find a professional from your Nearby feed</Text>
               </View>
             ) : (
               <ScrollView style={styles.shareModalList}>
                 {pros.map((pro) => (
-                  <Pressable key={pro.id} style={styles.proRow} onPress={() => sendToPro(pro)}>
+                  <Pressable key={pro.id} style={[styles.proRow, { backgroundColor: colors.surfaceSecondary }]} onPress={() => sendToPro(pro)}>
                     <Avatar uri={pro.avatar_url} name={pro.business_name || pro.display_name} size={48} />
                     <View style={styles.proRowInfo}>
-                      <Text style={styles.proRowName}>{pro.business_name || pro.display_name}</Text>
-                      <Text style={styles.proRowSub}>@{pro.username}</Text>
+                      <Text style={[styles.proRowName, { color: colors.onSurface }]}>{pro.business_name || pro.display_name}</Text>
+                      <Text style={[styles.proRowSub, { color: colors.muted }]}>@{pro.username}</Text>
                     </View>
                     {pro.from_conversation && (
-                      <View style={styles.recentBadge}>
-                        <Text style={styles.recentBadgeText}>Recent</Text>
+                      <View style={[styles.recentBadge, { backgroundColor: colors.brandTertiary }]}>
+                        <Text style={[styles.recentBadgeText, { color: colors.brandDeep }]}>Recent</Text>
                       </View>
                     )}
                     <MaterialCommunityIcons name="chevron-right" size={22} color={colors.muted} />
@@ -694,21 +721,12 @@ function post_tag_confirmed(post: any) {
   return post.tag_status === "confirmed";
 }
 
-function PostVideo({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = false;
-    p.play();
-  });
-  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls allowsFullscreen />;
-}
-
-function DetailRow({ label, value }: { label: string; value?: string | null }) {
+function DetailRow({ label, value, colors }: { label: string; value?: string | null; colors: any }) {
   if (!value) return null;
   return (
     <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
+      <Text style={[styles.detailLabel, { color: colors.muted }]}>{label}</Text>
+      <Text style={[styles.detailValue, { color: colors.onSurface }]}>{value}</Text>
     </View>
   );
 }
@@ -717,60 +735,65 @@ const styles = StyleSheet.create({
   heroBar: { position: "absolute", left: spacing.lg, right: spacing.lg, flexDirection: "row", justifyContent: "space-between" },
   body: { padding: spacing.lg },
   authorRow: { flexDirection: "row", alignItems: "center" },
-  authorName: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
-  authorHandle: { fontFamily: font.regular, fontSize: 12.5, color: colors.muted },
-  caption: { fontFamily: font.regular, fontSize: 15, lineHeight: 22, color: colors.onSurface, marginTop: spacing.md },
-  lookTitle: { fontFamily: font.displaySemi, fontSize: 28, color: colors.onSurface, marginTop: spacing.md },
-  lookSub: { fontFamily: font.medium, fontSize: 14, color: colors.muted, marginTop: 2 },
+  authorName: { fontFamily: font.bold, fontSize: 15 },
+  authorHandle: { fontFamily: font.regular, fontSize: 12.5 },
+  caption: { fontFamily: font.regular, fontSize: 15, lineHeight: 22, marginTop: spacing.md },
+  lookTitle: { fontFamily: font.displaySemi, fontSize: 28, marginTop: spacing.md },
+  lookSub: { fontFamily: font.medium, fontSize: 14, marginTop: 2 },
   detailsToggle: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md },
-  detailsToggleText: { fontFamily: font.bold, fontSize: 14, color: colors.brandDeep },
-  detailsCard: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, gap: spacing.md },
+  detailsToggleText: { fontFamily: font.bold, fontSize: 14 },
+  detailsCard: { borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, gap: spacing.md },
   detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  detailLabel: { fontFamily: font.semibold, fontSize: 11, color: colors.muted, letterSpacing: 0.6 },
-  detailValue: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface, flexShrink: 1, textAlign: "right", marginLeft: spacing.md },
-  proAttrib: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.brandTertiary, borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.md },
-  proAttribText: { fontFamily: font.medium, fontSize: 14, color: colors.onSurface },
-  tagRespond: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, borderWidth: 1, borderColor: colors.borderStrong },
-  tagRespondTitle: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface, marginBottom: 2 },
-  proDetails: { backgroundColor: "#F3EEF8", borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, borderLeftWidth: 3, borderLeftColor: colors.brandDeep },
+  detailLabel: { fontFamily: font.semibold, fontSize: 11, letterSpacing: 0.6 },
+  detailValue: { fontFamily: font.semibold, fontSize: 14, flexShrink: 1, textAlign: "right", marginLeft: spacing.md },
+  proAttrib: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.md },
+  proAttribText: { fontFamily: font.medium, fontSize: 14 },
+  tagRespond: { borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, borderWidth: 1 },
+  tagRespondTitle: { fontFamily: font.bold, fontSize: 15, marginBottom: 2 },
+  proDetails: { borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, borderLeftWidth: 3 },
   proDetailsHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.sm },
-  proDetailsTitle: { fontFamily: font.bold, fontSize: 11, color: colors.brandDeep, letterSpacing: 0.8 },
-  proDetailsText: { fontFamily: font.medium, fontSize: 14, lineHeight: 21, color: colors.onSurface },
-  proDetailsBy: { fontFamily: font.semibold, fontSize: 12, color: colors.muted, marginTop: spacing.sm },
-  proDetailsInput: { fontFamily: font.medium, fontSize: 14, color: colors.onSurface, minHeight: 70, textAlignVertical: "top" },
-  actions: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.xl, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
+  proDetailsTitle: { fontFamily: font.bold, fontSize: 11, letterSpacing: 0.8 },
+  proDetailsText: { fontFamily: font.medium, fontSize: 14, lineHeight: 21 },
+  proDetailsBy: { fontFamily: font.semibold, fontSize: 12, marginTop: spacing.sm },
+  proDetailsInput: { fontFamily: font.medium, fontSize: 14, minHeight: 70, textAlignVertical: "top" },
+  actions: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.xl, paddingTop: spacing.lg, borderTopWidth: 1 },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
-  actionCount: { fontFamily: font.semibold, fontSize: 14, color: colors.onSurface },
-  commentsTitle: { fontFamily: font.displaySemi, fontSize: 22, color: colors.onSurface, marginTop: spacing.xl },
+  actionCount: { fontFamily: font.semibold, fontSize: 14 },
+  commentsTitle: { fontFamily: font.displaySemi, fontSize: 22, marginTop: spacing.xl },
   comment: { flexDirection: "row", marginTop: spacing.lg },
-  commentAuthor: { fontFamily: font.bold, fontSize: 13, color: colors.onSurface },
-  commentText: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, color: colors.onSurfaceSecondary, marginTop: 1 },
+  commentAuthorRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  commentAuthor: { fontFamily: font.bold, fontSize: 13 },
+  proBadge: { borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 },
+  proBadgeText: { fontFamily: font.bold, fontSize: 10 },
+  commentText: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, marginTop: 1 },
+  commentAsProRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  commentAsProText: { fontFamily: font.semibold, fontSize: 13 },
   commentActions: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.xs },
   commentAction: { flexDirection: "row", alignItems: "center", gap: 4 },
-  commentActionText: { fontFamily: font.medium, fontSize: 12, color: colors.muted },
-  replyingToBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm },
-  replyingToText: { fontFamily: font.medium, fontSize: 13, color: colors.brandDeep },
-  bottomBar: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+  commentActionText: { fontFamily: font.medium, fontSize: 12 },
+  replyingToBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderRadius: radius.sm },
+  replyingToText: { fontFamily: font.medium, fontSize: 13 },
+  bottomBar: { borderTopWidth: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   commentInputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  commentInput: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill, paddingHorizontal: spacing.lg, height: 44, fontFamily: font.medium, fontSize: 14, color: colors.onSurface },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandDeep, alignItems: "center", justifyContent: "center" },
-  confirmBackdrop: { flex: 1, backgroundColor: colors.scrim },
-  confirmCard: { position: "absolute", left: spacing.lg, right: spacing.lg, top: "40%", backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.xl },
-  confirmTitle: { fontFamily: font.displaySemi, fontSize: 22, color: colors.onSurface, marginBottom: spacing.xs },
-  confirmSub: { fontFamily: font.regular, fontSize: 14, lineHeight: 20, color: colors.muted },
+  commentInput: { flex: 1, borderRadius: radius.pill, paddingHorizontal: spacing.lg, height: 44, fontFamily: font.medium, fontSize: 14 },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  confirmBackdrop: { flex: 1 },
+  confirmCard: { position: "absolute", left: spacing.lg, right: spacing.lg, top: "40%", borderRadius: radius.xl, padding: spacing.xl },
+  confirmTitle: { fontFamily: font.displaySemi, fontSize: 22, marginBottom: spacing.xs },
+  confirmSub: { fontFamily: font.regular, fontSize: 14, lineHeight: 20 },
   shareModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  shareModalContent: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "70%" },
-  shareModalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  shareModalTitle: { fontFamily: font.bold, fontSize: 18, color: colors.onSurface },
+  shareModalContent: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "70%" },
+  shareModalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1 },
+  shareModalTitle: { fontFamily: font.bold, fontSize: 18 },
   shareModalLoading: { padding: spacing.xl, alignItems: "center" },
   shareModalEmpty: { padding: spacing.xl, alignItems: "center", gap: spacing.sm },
-  shareModalEmptyText: { fontFamily: font.semibold, fontSize: 16, color: colors.onSurface },
-  shareModalEmptySub: { fontFamily: font.regular, fontSize: 14, color: colors.muted, textAlign: "center" },
+  shareModalEmptyText: { fontFamily: font.semibold, fontSize: 16 },
+  shareModalEmptySub: { fontFamily: font.regular, fontSize: 14, textAlign: "center" },
   shareModalList: { padding: spacing.md },
-  proRow: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.lg, marginBottom: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  proRow: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.lg, marginBottom: spacing.sm },
   proRowInfo: { flex: 1, marginLeft: spacing.md },
-  proRowName: { fontFamily: font.bold, fontSize: 15, color: colors.onSurface },
-  proRowSub: { fontFamily: font.regular, fontSize: 13, color: colors.muted },
-  recentBadge: { backgroundColor: colors.brandTertiary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2, marginRight: spacing.sm },
-  recentBadgeText: { fontFamily: font.semibold, fontSize: 11, color: colors.brandDeep },
+  proRowName: { fontFamily: font.bold, fontSize: 15 },
+  proRowSub: { fontFamily: font.regular, fontSize: 13 },
+  recentBadge: { borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2, marginRight: spacing.sm },
+  recentBadgeText: { fontFamily: font.semibold, fontSize: 11 },
 });
