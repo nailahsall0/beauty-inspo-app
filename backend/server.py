@@ -571,6 +571,7 @@ class ProOnboardIn(BaseModel):
 
 class ProUpdateIn(BaseModel):
     business_name: Optional[str] = None
+    username: Optional[str] = None
     bio: Optional[str] = None
     category_ids: Optional[List[str]] = None
     city: Optional[str] = None
@@ -654,6 +655,12 @@ async def update_me(body: ProfileUpdate, user: dict = Depends(get_current_user))
             raise HTTPException(409, "Username already taken")
     if updates:
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
+        # Sync display_name to professional profile's business_name if user is a pro
+        if "display_name" in updates and user.get("professional_id"):
+            await db.professional_profiles.update_one(
+                {"id": user["professional_id"]},
+                {"$set": {"business_name": updates["display_name"]}}
+            )
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return public_user(fresh)
 
@@ -1280,10 +1287,18 @@ async def pro_update(body: ProUpdateIn, user: dict = Depends(get_current_user)):
             continue
         if isinstance(v, str):
             v = v.strip()
-            # Skip empty strings for required fields like business_name
-            if k == "business_name" and not v:
+            # Skip empty strings for required fields like business_name and username
+            if k in ("business_name", "username") and not v:
                 continue
+            # Normalize username to lowercase
+            if k == "username":
+                v = v.lower()
         updates[k] = v
+    # Validate username uniqueness
+    if "username" in updates:
+        existing = await db.professional_profiles.find_one({"username": updates["username"]})
+        if existing and existing["id"] != user["professional_id"]:
+            raise HTTPException(409, "Username already taken")
     if "services" in updates:
         svcs = []
         for s in updates["services"]:
@@ -1291,6 +1306,9 @@ async def pro_update(body: ProUpdateIn, user: dict = Depends(get_current_user)):
             svcs.append(s)
         updates["services"] = svcs
     await db.professional_profiles.update_one({"id": user["professional_id"]}, {"$set": updates})
+    # Sync business_name to user's display_name so it shows consistently on posts
+    if "business_name" in updates and updates["business_name"]:
+        await db.users.update_one({"id": user["id"]}, {"$set": {"display_name": updates["business_name"]}})
     pro = await db.professional_profiles.find_one({"id": user["professional_id"]}, {"_id": 0})
     return pro
 

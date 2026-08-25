@@ -4,7 +4,8 @@ import { useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors, spacing, radius, font } from "@/src/theme/tokens";
+import { spacing, radius, font } from "@/src/theme/tokens";
+import { useTheme } from "@/src/hooks/useTheme";
 import { apiFetch } from "@/src/lib/api";
 import { Btn, IconBtn, Loading } from "@/src/components/ui";
 import { useToast } from "@/src/components/Toast";
@@ -15,8 +16,10 @@ export default function ProEdit() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { colors } = useTheme();
   const [pro, setPro] = useState<any>(null);
   const [business, setBusiness] = useState("");
+  const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
@@ -32,6 +35,7 @@ export default function ProEdit() {
     apiFetch("/professional/me").then((p) => {
       setPro(p);
       setBusiness(p.business_name || "");
+      setUsername(p.username || "");
       setBio(p.bio || "");
       setCity(p.city || "");
       setState(p.state || "");
@@ -57,6 +61,7 @@ export default function ProEdit() {
         method: "PUT",
         body: {
           business_name: business.trim(),
+          username: username.trim(),
           bio: bio.trim(),
           city: city.trim(),
           state: state.trim(),
@@ -76,33 +81,34 @@ export default function ProEdit() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface, paddingTop: insets.top + spacing.sm }}>
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <IconBtn icon="chevron-left" onPress={() => router.back()} />
-        <Text style={styles.title}>Edit Pro Profile</Text>
+        <Text style={[styles.title, { color: colors.onSurface }]}>Edit Pro Profile</Text>
       </View>
       <KeyboardAwareScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }} bottomOffset={90} showsVerticalScrollIndicator={false}>
-        <F label="Business name" value={business} onChange={setBusiness} testID="edit-business" />
-        <F label="Bio" value={bio} onChange={setBio} multiline testID="edit-bio" />
+        <F label="Business name" value={business} onChange={setBusiness} testID="edit-business" colors={colors} />
+        <F label="Username" value={username} onChange={setUsername} autoCap="none" testID="edit-username" colors={colors} />
+        <F label="Bio" value={bio} onChange={setBio} multiline testID="edit-bio" colors={colors} />
         <View style={{ flexDirection: "row", gap: spacing.md }}>
-          <View style={{ flex: 1 }}><F label="City" value={city} onChange={setCity} testID="edit-city" /></View>
-          <View style={{ width: 90 }}><F label="State" value={state} onChange={setState} testID="edit-state" /></View>
+          <View style={{ flex: 1 }}><F label="City" value={city} onChange={setCity} testID="edit-city" colors={colors} /></View>
+          <View style={{ width: 90 }}><F label="State" value={state} onChange={setState} testID="edit-state" colors={colors} /></View>
         </View>
-        <F label="Service radius (mi)" value={radius_} onChange={setRadius} keyboard="numeric" testID="edit-radius" />
-        <F label="Booking URL" value={booking} onChange={setBooking} autoCap="none" testID="edit-booking" />
+        <F label="Service radius (mi)" value={radius_} onChange={setRadius} keyboard="numeric" testID="edit-radius" colors={colors} />
+        <F label="Booking URL" value={booking} onChange={setBooking} autoCap="none" testID="edit-booking" colors={colors} />
         <View style={{ flexDirection: "row", gap: spacing.md }}>
-          <View style={{ flex: 1 }}><F label="Instagram" value={ig} onChange={setIg} autoCap="none" testID="edit-ig" /></View>
-          <View style={{ flex: 1 }}><F label="TikTok" value={tiktok} onChange={setTiktok} autoCap="none" testID="edit-tiktok" /></View>
+          <View style={{ flex: 1 }}><F label="Instagram" value={ig} onChange={setIg} autoCap="none" testID="edit-ig" colors={colors} /></View>
+          <View style={{ flex: 1 }}><F label="TikTok" value={tiktok} onChange={setTiktok} autoCap="none" testID="edit-tiktok" colors={colors} /></View>
         </View>
-        <F label="Website" value={website} onChange={setWebsite} autoCap="none" testID="edit-website" />
+        <F label="Website" value={website} onChange={setWebsite} autoCap="none" testID="edit-website" colors={colors} />
 
-        <Text style={styles.label}>Services & Pricing</Text>
+        <Text style={[styles.label, { color: colors.onSurface }]}>Services & Pricing</Text>
         {services.map((s, i) => (
-          <View key={i} style={styles.svcCard}>
-            <TextInput testID={`edit-svc-name-${i}`} value={s.name} onChangeText={(v) => update(i, "name", v)} placeholder="Service" placeholderTextColor={colors.faint} style={styles.svcInput} />
+          <View key={i} style={[styles.svcCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+            <TextInput testID={`edit-svc-name-${i}`} value={s.name} onChangeText={(v) => update(i, "name", v)} placeholder="Service" placeholderTextColor={colors.faint} style={[styles.svcInput, { backgroundColor: colors.surface, color: colors.onSurface }]} />
             <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
-              <TextInput testID={`edit-svc-price-${i}`} value={s.price} onChangeText={(v) => update(i, "price", v)} placeholder="Price $" keyboardType="numeric" placeholderTextColor={colors.faint} style={[styles.svcInput, { flex: 1 }]} />
-              <TextInput testID={`edit-svc-dur-${i}`} value={s.duration} onChangeText={(v) => update(i, "duration", v)} placeholder="Duration" placeholderTextColor={colors.faint} style={[styles.svcInput, { flex: 1 }]} />
-              <Pressable onPress={() => remove(i)} style={styles.svcRemove}>
+              <TextInput testID={`edit-svc-price-${i}`} value={s.price} onChangeText={(v) => update(i, "price", v)} placeholder="Price $" keyboardType="numeric" placeholderTextColor={colors.faint} style={[styles.svcInput, { flex: 1, backgroundColor: colors.surface, color: colors.onSurface }]} />
+              <TextInput testID={`edit-svc-dur-${i}`} value={s.duration} onChangeText={(v) => update(i, "duration", v)} placeholder="Duration" placeholderTextColor={colors.faint} style={[styles.svcInput, { flex: 1, backgroundColor: colors.surface, color: colors.onSurface }]} />
+              <Pressable onPress={() => remove(i)} style={[styles.svcRemove, { backgroundColor: colors.surface }]}>
                 <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.error} />
               </Pressable>
             </View>
@@ -110,34 +116,34 @@ export default function ProEdit() {
         ))}
         <Pressable testID="edit-add-service" onPress={addService} style={styles.addSvc}>
           <MaterialCommunityIcons name="plus" size={18} color={colors.brandDeep} />
-          <Text style={styles.addSvcText}>Add service</Text>
+          <Text style={[styles.addSvcText, { color: colors.brandDeep }]}>Add service</Text>
         </Pressable>
       </KeyboardAwareScrollView>
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md, borderTopColor: colors.border, backgroundColor: colors.surface }]}>
         <Btn testID="edit-save" label="Save Changes" onPress={save} loading={saving} />
       </View>
     </View>
   );
 }
 
-function F({ label, value, onChange, multiline, keyboard, autoCap, testID }: any) {
+function F({ label, value, onChange, multiline, keyboard, autoCap, testID, colors }: any) {
   return (
-    <View style={{ marginBottom: spacing.md }}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput testID={testID} value={value} onChangeText={onChange} placeholderTextColor={colors.faint} multiline={multiline} keyboardType={keyboard} autoCapitalize={autoCap} style={[styles.input, multiline && { minHeight: 90, textAlignVertical: "top", paddingTop: spacing.md }]} />
+    <View style={{ marginBottom: multiline ? spacing.lg : spacing.md }}>
+      <Text style={[styles.label, { color: colors.onSurface }]}>{label}</Text>
+      <TextInput testID={testID} value={value} onChangeText={onChange} placeholderTextColor={colors.faint} multiline={multiline} keyboardType={keyboard} autoCapitalize={autoCap} style={[styles.input, { backgroundColor: colors.surfaceSecondary, color: colors.onSurface, borderColor: colors.border }, multiline && { minHeight: 100, height: "auto", textAlignVertical: "top", paddingTop: spacing.md, paddingBottom: spacing.md }]} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  title: { fontFamily: font.displaySemi, fontSize: 24, color: colors.onSurface },
-  label: { fontFamily: font.semibold, fontSize: 13, color: colors.onSurface, marginBottom: 6, marginTop: spacing.sm },
-  input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 50, fontFamily: font.medium, fontSize: 15, color: colors.onSurface, borderWidth: 1, borderColor: colors.border },
-  svcCard: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
-  svcInput: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, height: 46, fontFamily: font.medium, fontSize: 14, color: colors.onSurface },
-  svcRemove: { width: 46, height: 46, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: 1 },
+  title: { fontFamily: font.displaySemi, fontSize: 24 },
+  label: { fontFamily: font.semibold, fontSize: 13, marginBottom: 6, marginTop: spacing.sm },
+  input: { borderRadius: radius.md, paddingHorizontal: spacing.lg, height: 50, fontFamily: font.medium, fontSize: 15, borderWidth: 1 },
+  svcCard: { borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, marginBottom: spacing.sm },
+  svcInput: { borderRadius: radius.md, paddingHorizontal: spacing.md, height: 46, fontFamily: font.medium, fontSize: 14 },
+  svcRemove: { width: 46, height: 46, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   addSvc: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: spacing.sm },
-  addSvcText: { fontFamily: font.bold, fontSize: 14, color: colors.brandDeep },
-  footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  addSvcText: { fontFamily: font.bold, fontSize: 14 },
+  footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1 },
 });
