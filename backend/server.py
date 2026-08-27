@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse, RedirectResponse
+from fastapi.responses import Response, StreamingResponse, RedirectResponse, HTMLResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
@@ -2280,6 +2280,185 @@ async def admin_update_category(cid: str, active: bool, admin: dict = Depends(re
 @api.get("/")
 async def root():
     return {"message": "brook.ie API", "status": "ok"}
+
+
+# ----------------------- Legal Pages -----------------------
+
+PRIVACY_POLICY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Brook.ie</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #2C2421; background: #FDFBF7; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        h2 { font-size: 1.3rem; margin: 2rem 0 1rem; border-bottom: 2px solid #C9B6DE; padding-bottom: 0.5rem; }
+        h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+        p { margin-bottom: 1rem; }
+        ul { margin: 1rem 0; padding-left: 1.5rem; }
+        li { margin-bottom: 0.5rem; }
+        .updated { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+        .contact { background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-top: 2rem; }
+        .logo { font-weight: bold; color: #A98FC9; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last Updated: August 2025</p>
+    <p><span class="logo">Brook.ie</span> ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and share information when you use our mobile application ("App").</p>
+    <h2>1. Information We Collect</h2>
+    <h3>Information You Provide</h3>
+    <ul>
+        <li><strong>Account Information:</strong> Email address, display name, username, and password when you create an account</li>
+        <li><strong>Profile Information:</strong> Profile photo, bio, city, state, and interests</li>
+        <li><strong>Content:</strong> Photos, videos, captions, and comments you post</li>
+        <li><strong>Professional Information:</strong> If you register as a professional, we collect your business name, services, pricing, booking URL, and social media handles</li>
+        <li><strong>Communications:</strong> Messages you send to other users through the App</li>
+    </ul>
+    <h3>Information Collected Automatically</h3>
+    <ul>
+        <li><strong>Location Data:</strong> With your permission, we collect your approximate location to show you nearby beauty professionals and content</li>
+        <li><strong>Device Information:</strong> Device type, operating system, and unique device identifiers</li>
+        <li><strong>Usage Data:</strong> How you interact with the App, including features used and content viewed</li>
+    </ul>
+    <h2>2. How We Use Your Information</h2>
+    <p>We use the information we collect to:</p>
+    <ul>
+        <li>Provide, maintain, and improve the App</li>
+        <li>Create and manage your account</li>
+        <li>Display your content to other users</li>
+        <li>Connect you with beauty professionals in your area</li>
+        <li>Send you notifications about activity on your account</li>
+        <li>Respond to your questions and provide customer support</li>
+        <li>Detect and prevent fraud, abuse, and security issues</li>
+        <li>Comply with legal obligations</li>
+    </ul>
+    <h2>3. How We Share Your Information</h2>
+    <h3>Public Information</h3>
+    <p>Your profile information, posts, and comments are visible to other users of the App. Professional profiles are publicly visible.</p>
+    <h3>Service Providers</h3>
+    <p>We share information with third-party service providers who help us operate the App, including cloud hosting and storage providers, analytics providers, and push notification services.</p>
+    <h3>Legal Requirements</h3>
+    <p>We may disclose information if required by law, legal process, or government request.</p>
+    <h2>4. Data Retention</h2>
+    <p>We retain your information for as long as your account is active or as needed to provide you services. You can request deletion of your account and associated data at any time.</p>
+    <h2>5. Your Rights and Choices</h2>
+    <ul>
+        <li><strong>Access and Update:</strong> You can access and update your account information through the App settings</li>
+        <li><strong>Delete Account:</strong> You can delete your account in the App settings</li>
+        <li><strong>Location:</strong> You can disable location access through your device settings</li>
+        <li><strong>Notifications:</strong> You can manage push notification preferences in your device settings</li>
+    </ul>
+    <h2>6. Data Security</h2>
+    <p>We implement appropriate technical and organizational measures to protect your information. However, no method of transmission or storage is 100% secure.</p>
+    <h2>7. Children's Privacy</h2>
+    <p>The App is not intended for children under 13. We do not knowingly collect information from children under 13.</p>
+    <h2>8. Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. We will notify you of any material changes by posting the new policy in the App.</p>
+    <div class="contact">
+        <h2>9. Contact Us</h2>
+        <p>If you have questions about this Privacy Policy, please contact us at:</p>
+        <p><strong>Email:</strong> support@brookie.app</p>
+    </div>
+    <p style="margin-top: 2rem; text-align: center; color: #666;">2025 Brook.ie</p>
+</body>
+</html>"""
+
+TERMS_OF_SERVICE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service - Brook.ie</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #2C2421; background: #FDFBF7; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        h2 { font-size: 1.3rem; margin: 2rem 0 1rem; border-bottom: 2px solid #C9B6DE; padding-bottom: 0.5rem; }
+        h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+        p { margin-bottom: 1rem; }
+        ul { margin: 1rem 0; padding-left: 1.5rem; }
+        li { margin-bottom: 0.5rem; }
+        .updated { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+        .contact { background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-top: 2rem; }
+        .logo { font-weight: bold; color: #A98FC9; }
+        .disclaimer { background: #fff3cd; padding: 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #ffc107; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <h1>Terms of Service</h1>
+    <p class="updated">Last Updated: August 2025</p>
+    <p>Welcome to <span class="logo">Brook.ie</span>! These Terms of Service ("Terms") govern your use of the Brook.ie mobile application ("App").</p>
+    <p><strong>By using the App, you agree to these Terms. If you do not agree, do not use the App.</strong></p>
+    <h2>1. Eligibility</h2>
+    <p>You must be at least 13 years old to use the App.</p>
+    <h2>2. Your Account</h2>
+    <ul>
+        <li>You are responsible for maintaining the security of your account and password</li>
+        <li>You are responsible for all activity that occurs under your account</li>
+        <li>You must provide accurate and complete information when creating your account</li>
+    </ul>
+    <h2>3. User Content</h2>
+    <p>You retain ownership of content you post. By posting, you grant us a worldwide, non-exclusive, royalty-free license to use, display, reproduce, and distribute your content in connection with operating the App.</p>
+    <p><strong>You agree not to post content that:</strong></p>
+    <ul>
+        <li>Is illegal, harmful, threatening, abusive, or defamatory</li>
+        <li>Infringes on intellectual property rights of others</li>
+        <li>Contains nudity, sexually explicit material, or pornography</li>
+        <li>Promotes violence, discrimination, or illegal activities</li>
+        <li>Contains spam, malware, or deceptive content</li>
+    </ul>
+    <p>We reserve the right to remove any content that violates these Terms.</p>
+    <h2>4. Professional Accounts</h2>
+    <p>If you register as a beauty professional, you represent that you have the right to offer the services you list. We do not guarantee any bookings or business outcomes.</p>
+    <h2>5. Prohibited Conduct</h2>
+    <ul>
+        <li>Use the App for any illegal purpose</li>
+        <li>Harass, abuse, or harm other users</li>
+        <li>Attempt to gain unauthorized access to the App</li>
+        <li>Use automated means to access the App without permission</li>
+    </ul>
+    <h2>6. Reporting</h2>
+    <p>You can report content or users that violate these Terms. We will review reports and take appropriate action.</p>
+    <h2>7. Termination</h2>
+    <p>We may suspend or terminate your account at any time for violating these Terms. You may delete your account at any time through the App settings.</p>
+    <h2>8. Disclaimers</h2>
+    <div class="disclaimer">
+        <p>THE APP IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND. WE ARE NOT RESPONSIBLE FOR: the conduct of any user; the quality or legality of services offered by professionals; any transactions between users; or user content posted by others.</p>
+    </div>
+    <h2>9. Limitation of Liability</h2>
+    <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, WE SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING FROM YOUR USE OF THE APP.</p>
+    <h2>10. Changes to Terms</h2>
+    <p>We may update these Terms from time to time. Your continued use of the App after changes constitutes acceptance.</p>
+    <h2>11. Governing Law</h2>
+    <p>These Terms are governed by the laws of the United States.</p>
+    <div class="contact">
+        <h2>12. Contact Us</h2>
+        <p>If you have questions about these Terms, please contact us at:</p>
+        <p><strong>Email:</strong> support@brookie.app</p>
+    </div>
+    <p style="margin-top: 2rem; text-align: center; color: #666;">2025 Brook.ie</p>
+</body>
+</html>"""
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy():
+    return PRIVACY_POLICY_HTML
+
+
+@app.get("/terms", response_class=HTMLResponse)
+@app.get("/terms-of-service", response_class=HTMLResponse)
+async def terms_of_service():
+    return TERMS_OF_SERVICE_HTML
+
+
+@app.get("/support")
+async def support_page():
+    return {"email": "support@brookie.app"}
 
 
 app.include_router(api)
