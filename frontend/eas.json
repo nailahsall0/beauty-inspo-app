@@ -7,6 +7,13 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
+        "simulator": false
+      }
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
         "simulator": true
       }
     },
@@ -18,6 +25,9 @@
     },
     "production": {
       "distribution": "store",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://beauty-inspo-app-production.up.railway.app"
+      },
       "ios": {
         "resourceClass": "m-medium"
       }
@@ -26,9 +36,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "YOUR_APPLE_ID",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "nailahsall0@gmail.com",
+        "ascAppId": "6804337464",
+        "appleTeamId": "S2GQ8985L6"
       }
     }
   }
