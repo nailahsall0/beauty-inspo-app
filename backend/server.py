@@ -665,6 +665,42 @@ async def update_me(body: ProfileUpdate, user: dict = Depends(get_current_user))
     return public_user(fresh)
 
 
+class DeleteAccountBody(BaseModel):
+    password: str
+
+
+@api.delete("/users/me")
+async def delete_account(body: DeleteAccountBody, user: dict = Depends(get_current_user)):
+    """Permanently delete user account and all associated data."""
+    # Verify password
+    stored = await db.users.find_one({"id": user["id"]})
+    if not stored or not bcrypt.checkpw(body.password.encode(), stored["password_hash"].encode()):
+        raise HTTPException(403, "Incorrect password")
+
+    user_id = user["id"]
+
+    # Delete all user data
+    await db.posts.delete_many({"author_id": user_id})
+    await db.comments.delete_many({"author_id": user_id})
+    await db.likes.delete_many({"user_id": user_id})
+    await db.saves.delete_many({"user_id": user_id})
+    await db.follows.delete_many({"$or": [{"follower_id": user_id}, {"following_id": user_id}]})
+    await db.notifications.delete_many({"$or": [{"user_id": user_id}, {"actor_id": user_id}]})
+    await db.messages.delete_many({"sender_id": user_id})
+    await db.conversations.delete_many({"participants": user_id})
+    await db.collections.delete_many({"user_id": user_id})
+    await db.reports.delete_many({"reporter_id": user_id})
+
+    # Delete professional profile if exists
+    if user.get("professional_id"):
+        await db.professional_profiles.delete_one({"id": user["professional_id"]})
+
+    # Delete user account
+    await db.users.delete_one({"id": user_id})
+
+    return {"message": "Account deleted successfully"}
+
+
 @api.get("/users/{user_id}")
 async def get_user(user_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     u = await db.users.find_one({"id": user_id}, {"_id": 0})
